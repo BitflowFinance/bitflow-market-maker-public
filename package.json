@@ -1,5 +1,5 @@
 {
-  "name": "bitflow-market-maker",
+  "name": "bitflow-market-maker-public",
   "version": "0.1.0",
   "description": "Bitflow DLMM curve market maker for sBTC/USDCx and STX/USDCx.",
   "scripts": {
