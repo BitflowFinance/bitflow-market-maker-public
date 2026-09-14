@@ -21,4 +21,4 @@ The read-only HTTP API (`/health`, `/status`, `/metrics`, `/history`) binds to `
 
 ## Reporting a vulnerability
 
-Please do not open a public issue for a security bug. Use GitHub's private vulnerability reporting on this repository ("Security" tab, "Report a vulnerability") if it is enabled. If it is not, open an issue that says only "security report, please provide a contact" and a maintainer will reply with one.
+To report a vulnerability, please use GitHub's private vulnerability reporting on this repository ("Security" tab, "Report a vulnerability").

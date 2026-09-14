@@ -46,17 +46,17 @@ What you need before `npm install`. Facts only; how much to fund is your decisio
 
    ```bash
    npm install --no-save @stacks/wallet-sdk
-   node -e "require('@stacks/wallet-sdk').generateWallet({secretKey: process.env.SEED, password: ''}).then(w => console.log(w.accounts[0].stxPrivateKey))"
+   SEED="<your-seed-phrase-here>" node -e "require('@stacks/wallet-sdk').generateWallet({secretKey: process.env.SEED, password: ''}).then(w => console.log(w.accounts[0].stxPrivateKey))"
    ```
 
-   Run it with `SEED="your 24 words"` in front, then clear the shell history. In live mode the bot refuses to start if the key does not derive to `SIGNER_ADDRESS`, so a mistake here fails safe.
-4. **STX for gas** in that account. Each transaction costs between `MIN_TX_FEE_USTX` and `MAX_TX_FEE_USTX` (0.05 to 0.15 STX in the pair files), and the bot keeps `STX_GAS_RESERVE_USTX` (5 STX by default) undeployed at all times. For the STX/USDCx pool the same STX balance is also the inventory.
+   Be sure to clear the shell history after running the commands above. In live mode the bot refuses to start if the key does not derive to `SIGNER_ADDRESS`, so a mistake here fails safe.
+4. **STX for gas** in that account. Each transaction costs between `MIN_TX_FEE_USTX` and `MAX_TX_FEE_USTX` (0.05 to 0.15 STX by default in the pair files), and the bot keeps `STX_GAS_RESERVE_USTX` (5 STX by default) undeployed at all times. For the STX/USDCx pool the same STX balance is also the inventory.
 5. **Both pool tokens** in that account. The bot does not bootstrap a one-sided wallet well: its default target is `F_STAR` (0.38) of deployed value in the base token, and if you start above `F_HARD` (0.67) in base with `ENABLE_SWAP=true` the first live tick may sell base for quote.
    - **sBTC** (sBTC/USDCx pool): deposit BTC through the official sBTC bridge, or swap into it on Bitflow.
    - **USDCx** (both pools): bridged USDC on Stacks. Acquire it through its issuer's official route or swap into it on Bitflow.
    - **STX** (STX/USDCx pool): any exchange that supports Stacks withdrawals.
 
-   Whichever route you use, check the token contract you receive against `BASE_TOKEN_CONTRACT` / `QUOTE_TOKEN_CONTRACT` in the pair file. Same name is not the same token.
+   Whichever route you use, verify the contract address of the token you receive matches the contract address of the token in the pair file (`BASE_TOKEN_CONTRACT` / `QUOTE_TOKEN_CONTRACT`).
 
 No API keys are needed. `BFF_API_KEY` can stay blank. `STACKS_NODE_URL` can stay blank too; the bot then uses the public Hiro API, which is rate limited. Set your own node or a paid endpoint if you see `429` errors in the log.
 
