@@ -271,6 +271,16 @@ const fetchUserBinsV2 = async (poolId: string, address: string): Promise<UserBin
         `tip_lag="${res.tipLag}" code="${res.errorCode || ''}"`,
     );
   }
+  // clean+complete is not the same as current: the engine still answers 200 while
+  // it is some blocks behind, and only escalates to a 503 TIP_LAG further back.
+  // A lagging book can omit bins we have since deployed, so repositioning off it
+  // would add on top of liquidity we already own -- the exact failure the clean
+  // check exists to prevent.
+  if (typeof res.tipLag !== 'number' || res.tipLag > CONFIG.BFF_MAX_TIP_LAG) {
+    throw new Error(
+      `inventory snapshot stale tip_lag="${res.tipLag}" max="${CONFIG.BFF_MAX_TIP_LAG}"`,
+    );
+  }
   return (res.bins || []).map((b) => ({
     bin_id: Number(b.binIdUnsigned),
     userShares: b.userShares,

@@ -122,10 +122,15 @@ shape so nothing downstream knows which one is live:
   via `signedBinId`.
 - **Inventory.** v2 reads `app/v2/users/{addr}/positions/{pool}/current-bins`,
   which carries raw integer shares plus bin totals and tip freshness. A snapshot
-  that is not `clean` *and* `complete` throws rather than being read as an empty
-  position, which would make the bot redeploy over liquidity it already owns.
-  Beware: v2 repurposed `userLiquidity` as a human-scaled float and moved the raw
-  count to `userShares`, so `userBinLiquidity` prefers the latter.
+  that is not `clean` *and* `complete` *and* at `tipLag <= BFF_MAX_TIP_LAG` throws
+  rather than being read as an empty or current position, which would make the bot
+  redeploy over liquidity it already owns. `clean` alone is not enough: the engine
+  answers 200 while some blocks behind and only escalates to 503 `TIP_LAG` further
+  back. Beware: v2 repurposed `userLiquidity` as a human-scaled float and moved the
+  raw count to `userShares`, so `userBinLiquidity` prefers the latter.
+  (Bitflow's own Rust market maker uses the ClusterIP `/api/mm/v1` inventory
+  service, which is unreachable outside their cluster; `current-bins` is the
+  public equivalent and applies the same freshness rules.)
 - **Pool id form.** `current-bins` keys off the alias (`dlmm_1`) and 404s on a
   contract principal; the other `app/v2` routes are the reverse. v2 also nulls
   `pool_token`/`core_address`, so the principal that post-conditions are built

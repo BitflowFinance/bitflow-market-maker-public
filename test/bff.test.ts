@@ -142,14 +142,42 @@ describe('v2 inventory (current-bins)', () => {
     await expect(fetchUserBins(POOL, SIGNER)).rejects.toThrow(/RECONCILE_DIRTY/);
   });
 
-  it('accepts a genuinely empty book (clean + complete + no bins)', async () => {
+  it('accepts a genuinely empty book (clean + complete + caught up + no bins)', async () => {
     vi.stubGlobal(
       'fetch',
-      route({ '/current-bins': { clean: true, complete: true, bins: [], overallUserShares: '0' } }),
+      route({
+        '/current-bins': {
+          clean: true,
+          complete: true,
+          tipLag: 0,
+          bins: [],
+          overallUserShares: '0',
+        },
+      }),
     );
     CONFIG.BFF_API_VERSION = 'v2';
 
     await expect(fetchUserBins(POOL, SIGNER)).resolves.toEqual([]);
+  });
+
+  // The engine answers 200 while still some blocks behind and only escalates to
+  // 503 TIP_LAG further back, so clean+complete alone does not mean current.
+  it('rejects a clean but lagging snapshot rather than trusting it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      route({ '/current-bins': { ...fixtures.v2.currentBins, tipLag: 2 } }),
+    );
+    CONFIG.BFF_API_VERSION = 'v2';
+
+    await expect(fetchUserBins(POOL, SIGNER)).rejects.toThrow(/stale tip_lag="2"/);
+  });
+
+  it('rejects a snapshot that omits tipLag entirely', async () => {
+    const { tipLag: _omitted, ...noTip } = fixtures.v2.currentBins as Record<string, unknown>;
+    vi.stubGlobal('fetch', route({ '/current-bins': noTip }));
+    CONFIG.BFF_API_VERSION = 'v2';
+
+    await expect(fetchUserBins(POOL, SIGNER)).rejects.toThrow(/stale tip_lag/);
   });
 });
 
