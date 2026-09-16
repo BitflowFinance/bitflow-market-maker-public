@@ -123,6 +123,23 @@ export const fetchJson = async <T = unknown>(
   }, CONFIG.STACKS_CALL_MAX_RETRIES);
 };
 
+// Same as fetchJson but treats 404 as a legitimate "nothing here" answer rather
+// than a failure to retry, for endpoints that 404 instead of returning an empty
+// collection.
+export const fetchJsonAllowMissing = async <T = unknown>(
+  url: string,
+  apiKey = '',
+): Promise<T | null> => {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['X-API-Key'] = apiKey;
+  return retry(async () => {
+    const res = await fetch(url, { headers });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} (${url})`);
+    return (await res.json()) as T;
+  }, CONFIG.STACKS_CALL_MAX_RETRIES);
+};
+
 export const getFtBalance = async (
   tokenContract: string,
   address: string,

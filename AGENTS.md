@@ -111,6 +111,32 @@ orientation. Token decimals are hydrated from the BFF at startup. The native-STX
 wrapper (`STX_TOKEN_CONTRACT`) is kept so STX post-conditions and the STX/USDCx
 gas+inventory path work.
 
+## BFF API generations
+
+`BFF_API_VERSION` selects the API generation (`v2` default, `v1` fallback). The
+two must never be mixed; `bitflow.ts` normalizes a whole generation onto the v1
+shape so nothing downstream knows which one is live:
+
+- **Bin ids.** v2 serves the ladder and active bin signed (`-500..500`); they are
+  shifted to the unsigned `0..1000` domain on read. Contract calls convert back
+  via `signedBinId`.
+- **Inventory.** v2 reads `app/v2/users/{addr}/positions/{pool}/current-bins`,
+  which carries raw integer shares plus bin totals and tip freshness. A snapshot
+  that is not `clean` *and* `complete` throws rather than being read as an empty
+  position, which would make the bot redeploy over liquidity it already owns.
+  Beware: v2 repurposed `userLiquidity` as a human-scaled float and moved the raw
+  count to `userShares`, so `userBinLiquidity` prefers the latter.
+- **Pool id form.** `current-bins` keys off the alias (`dlmm_1`) and 404s on a
+  contract principal; the other `app/v2` routes are the reverse. v2 also nulls
+  `pool_token`/`core_address`, so the principal that post-conditions are built
+  against comes from `pool_id`.
+- **Empty positions.** v1 answers 404 (not an empty list) for a wallet that has
+  never deployed to the pool, which is every wallet's first tick; that one case is
+  read as "no position" instead of tripping the api-error breaker.
+
+No API key is required for the default 50 req/s per-IP tier and a tick spends
+about four calls; set `BFF_API_KEY` only if Bitflow issues one for a raised quota.
+
 The curve uses the `add_shaped_liquidity` step: it carries the shape (bin
 offsets + weights + size fraction) and the primitive sizes amounts from live
 balances at execution. `halt` is two-tier: `operational` (withdraw + stop) or

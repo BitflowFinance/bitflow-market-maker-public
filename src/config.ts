@@ -51,6 +51,11 @@ export interface AppConfig {
 
   BFF_API_BASE_URL: string;
   BFF_API_KEY: string;
+  // 'v2' (default) or 'v1'. The two generations must not be mixed: v2 reports bin
+  // ids in a signed domain and serves inventory from a different endpoint, so the
+  // adapter in bitflow.ts normalizes a whole generation at once. v1 is kept as an
+  // escape hatch while v2 beds in.
+  BFF_API_VERSION: string;
 
   STACKS_NODE_URL: string;
   STACKS_NODE_KEY: string;
@@ -169,6 +174,7 @@ export const CONFIG: AppConfig = {
 
   BFF_API_BASE_URL: process.env.BFF_API_BASE_URL || 'https://bff.bitflowapis.finance/api',
   BFF_API_KEY: process.env.BFF_API_KEY || '',
+  BFF_API_VERSION: process.env.BFF_API_VERSION === 'v1' ? 'v1' : 'v2',
 
   STACKS_NODE_URL: process.env.STACKS_NODE_URL || '',
   STACKS_NODE_KEY: process.env.STACKS_NODE_KEY || '',

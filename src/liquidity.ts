@@ -22,7 +22,9 @@ import {
   BIN_CENTER,
   PoolBin,
   PoolBinsResponse,
+  QuotesPool,
   UserBin,
+  apiVersion,
   fetchPoolBins,
   fetchQuotesPool,
   fetchUserBins,
@@ -100,6 +102,30 @@ export const poolRef = (poolContract: string, xToken: string, yToken: string): L
   x: tokenRef(xToken),
   y: tokenRef(yToken),
 });
+
+// A live DLMM pool always charges a provider/protocol fee, so an all-zero fee
+// table means the BFF is serving incomplete pool metadata. Sizing an add off
+// those numbers builds a max-fee post-condition of 0, which the contract then
+// aborts against -- so fail here instead of burning gas on a transaction that
+// cannot confirm.
+export const poolFeesFrom = (quotes: QuotesPool): PoolFees => {
+  const fees: PoolFees = {
+    xProtocol: toNum(quotes.x_protocol_fee),
+    xProvider: toNum(quotes.x_provider_fee),
+    xVariable: toNum(quotes.x_variable_fee),
+    yProtocol: toNum(quotes.y_protocol_fee),
+    yProvider: toNum(quotes.y_provider_fee),
+    yVariable: toNum(quotes.y_variable_fee),
+  };
+  const total = Object.values(fees).reduce((a, b) => a + b, 0);
+  if (total === 0) {
+    throw new Error(
+      `pool ${quotes.pool_id} reports zero fees from the BFF (api_version=${apiVersion()}); ` +
+        'refusing to add liquidity because the max-fee post-condition would abort on-chain',
+    );
+  }
+  return fees;
+};
 
 export interface PoolFees {
   xProtocol: number;
@@ -465,14 +491,7 @@ export const prepareAddLiquidity = async (req: AddLiquidityRequest): Promise<Pre
   const bin = (binsRes.bins || []).find((b) => Number(b.bin_id) === targetBin);
   if (!bin) throw new Error(`bin ${targetBin} not found in pool ${req.poolId}`);
 
-  const fees: PoolFees = {
-    xProtocol: toNum(quotes.x_protocol_fee),
-    xProvider: toNum(quotes.x_provider_fee),
-    xVariable: toNum(quotes.x_variable_fee),
-    yProtocol: toNum(quotes.y_protocol_fee),
-    yProvider: toNum(quotes.y_provider_fee),
-    yVariable: toNum(quotes.y_variable_fee),
-  };
+  const fees = poolFeesFrom(quotes);
 
   const slip = calcAddSlippage(
     {
@@ -585,7 +604,9 @@ const deployedPositionValue = async (
   signer: string,
   binsRes: PoolBinsResponse,
 ): Promise<bigint> => {
-  const userBins: UserBin[] = await fetchUserBins(poolId, signer).catch(() => []);
+  // Not swallowed: reading a failed inventory fetch as "nothing deployed" would
+  // zero the MAX_POSITION_USTX accounting and let the next add breach the cap.
+  const userBins: UserBin[] = await fetchUserBins(poolId, signer);
   if (userBins.length === 0) return BigInt(0);
   const byId = new Map<number, PoolBin>();
   for (const pb of binsRes.bins || []) byId.set(Number(pb.bin_id), pb);
@@ -593,13 +614,17 @@ const deployedPositionValue = async (
   let value = 0;
   for (const ub of userBins) {
     const pb = byId.get(Number(ub.bin_id));
-    if (!pb) continue;
-    const total = Number(toBig(pb.liquidity));
     const shares = Number(userBinLiquidity(ub));
+    // Prefer the inventory's own bin totals/reserves; the ladder is a fallback
+    // because v2 nulls `liquidity` on low-liquidity bins.
+    const total = Number(toBig(ub.liquidity ?? pb?.liquidity));
     if (total <= 0 || shares <= 0) continue;
+    const price = Number(pb?.price ?? 0) / PRICE_SCALE_BPS; // Y per X
+    if (price <= 0) continue;
     const frac = shares / total;
-    const price = Number(pb.price) / PRICE_SCALE_BPS; // Y per X
-    value += frac * (Number(toBig(pb.reserve_x)) * price + Number(toBig(pb.reserve_y)));
+    const reserveX = Number(toBig(ub.reserve_x ?? pb?.reserve_x));
+    const reserveY = Number(toBig(ub.reserve_y ?? pb?.reserve_y));
+    value += frac * (reserveX * price + reserveY);
   }
   return BigInt(Math.floor(value));
 };
@@ -728,14 +753,7 @@ export const prepareShapedAddLiquidity = async (req: ShapedAddRequest): Promise<
   }));
   const alloc = allocateCurve(legs, upperMicro, lowerMicro);
 
-  const fees: PoolFees = {
-    xProtocol: toNum(quotes.x_protocol_fee),
-    xProvider: toNum(quotes.x_provider_fee),
-    xVariable: toNum(quotes.x_variable_fee),
-    yProtocol: toNum(quotes.y_protocol_fee),
-    yProvider: toNum(quotes.y_provider_fee),
-    yVariable: toNum(quotes.y_variable_fee),
-  };
+  const fees = poolFeesFrom(quotes);
   const binById = new Map<number, PoolBin>();
   for (const pb of binsRes.bins || []) binById.set(Number(pb.bin_id), pb);
 
