@@ -183,6 +183,37 @@ export const fetchQuotesPool = async (poolId: string): Promise<QuotesPool> => {
 export const fetchAppPool = (poolId: string): Promise<AppPool> =>
   fetchJson<AppPool>(`${base()}/app/v1/pools/${poolId}`, CONFIG.BFF_API_KEY);
 
+export interface EngineStatus {
+  ready?: boolean;
+  tip_lag?: number | null;
+  state_height?: number;
+  chain_tip?: number;
+}
+
+export interface TipCheck {
+  fresh: boolean;
+  reason: string;
+}
+
+// v2 serves quotes from in-memory AMM state at the applied tip, so there is no
+// stale-DB fallback to lean on: freshness has to be asserted before we size an
+// add against these reserves. v1 has no equivalent gate.
+export const checkEngineTip = async (): Promise<TipCheck> => {
+  if (apiVersion() !== 'v2') return { fresh: true, reason: 'v1 (no tip gate)' };
+  const s = await fetchJson<EngineStatus>(`${base()}/quotes/v2/status`, CONFIG.BFF_API_KEY);
+  if (s.ready === false) return { fresh: false, reason: 'engine not ready' };
+  // A null lag means the engine cannot see the tip, which is not the same as
+  // being caught up and must never be read as such.
+  if (typeof s.tip_lag !== 'number') {
+    return { fresh: false, reason: `tip_lag unknown (state_height=${s.state_height})` };
+  }
+  const max = CONFIG.BFF_MAX_TIP_LAG;
+  if (s.tip_lag > max) {
+    return { fresh: false, reason: `tip_lag=${s.tip_lag} > max=${max}` };
+  }
+  return { fresh: true, reason: `tip_lag=${s.tip_lag}` };
+};
+
 export const fetchPoolBins = async (poolId: string): Promise<PoolBinsResponse> => {
   const v = apiVersion();
   const res = await fetchJson<PoolBinsResponse>(

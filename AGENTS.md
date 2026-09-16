@@ -133,6 +133,18 @@ shape so nothing downstream knows which one is live:
 - **Empty positions.** v1 answers 404 (not an empty list) for a wallet that has
   never deployed to the pool, which is every wallet's first tick; that one case is
   read as "no position" instead of tripping the api-error breaker.
+- **Tip freshness.** v2 serves quotes from in-memory state at the applied tip and
+  has no stale-DB fallback (`X-Allow-Fallback` does not apply), so every tick
+  gates on `quotes/v2/status`: the tick holds unless `tip_lag <= BFF_MAX_TIP_LAG`
+  (default 0). A null `tip_lag` means the tip is unknown and is treated as stale,
+  never as caught up.
+- **Bin shares.** Quote v2 documents the ladder's `liquidity` as always null (in
+  practice it is populated near the active bin and null in the dust tail). Shares
+  are the denominator for `minDlp`, so `resolveBinShares` falls back to the pool's
+  `get-total-supply` for any bin the ladder does not price. Defaulting to zero
+  instead would take `calcAddSlippage` down its empty-bin sqrt branch, which
+  mis-sizes `minDlp` in either direction: too high aborts the add on-chain, too
+  low forfeits slippage protection.
 
 No API key is required for the default 50 req/s per-IP tier and a tick spends
 about four calls; set `BFF_API_KEY` only if Bitflow issues one for a raised quota.

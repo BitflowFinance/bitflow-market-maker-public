@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CONFIG } from '../src/config';
 import {
+  checkEngineTip,
   fetchPoolBins,
   fetchQuotesPool,
   fetchUserBins,
@@ -196,6 +197,49 @@ describe('pool fee guard', () => {
     // aborts against. v2 briefly served this for dlmm_1 before it was fixed.
     const zeroFees = { ...fixtures.v1.pool, x_protocol_fee: 0, x_provider_fee: 0, y_protocol_fee: 0, y_provider_fee: 0 };
     expect(() => poolFeesFrom(zeroFees as never)).toThrow(/zero fees/);
+  });
+});
+
+describe('engine tip gate', () => {
+  const status = (body: unknown) => route({ '/quotes/v2/status': body });
+
+  it('passes when the engine is caught up', async () => {
+    vi.stubGlobal('fetch', status({ ready: true, tip_lag: 0, state_height: 8999734 }));
+    CONFIG.BFF_API_VERSION = 'v2';
+
+    await expect(checkEngineTip()).resolves.toMatchObject({ fresh: true });
+  });
+
+  it('holds when the engine trails the chain tip', async () => {
+    vi.stubGlobal('fetch', status({ ready: true, tip_lag: 3 }));
+    CONFIG.BFF_API_VERSION = 'v2';
+
+    const res = await checkEngineTip();
+    expect(res.fresh).toBe(false);
+    expect(res.reason).toMatch(/tip_lag=3/);
+  });
+
+  it('treats an unknown tip as stale, never as caught up', async () => {
+    vi.stubGlobal('fetch', status({ ready: true, tip_lag: null }));
+    CONFIG.BFF_API_VERSION = 'v2';
+
+    await expect(checkEngineTip()).resolves.toMatchObject({ fresh: false });
+  });
+
+  it('respects a relaxed BFF_MAX_TIP_LAG policy', async () => {
+    vi.stubGlobal('fetch', status({ ready: true, tip_lag: 2 }));
+    CONFIG.BFF_API_VERSION = 'v2';
+    CONFIG.BFF_MAX_TIP_LAG = 2;
+
+    await expect(checkEngineTip()).resolves.toMatchObject({ fresh: true });
+    CONFIG.BFF_MAX_TIP_LAG = 0;
+  });
+
+  it('is a no-op on v1, which has no tip surface', async () => {
+    vi.stubGlobal('fetch', route());
+    CONFIG.BFF_API_VERSION = 'v1';
+
+    await expect(checkEngineTip()).resolves.toMatchObject({ fresh: true });
   });
 });
 

@@ -1,7 +1,7 @@
 import { existsSync } from 'fs';
 import { CONFIG } from './config';
 import { logInfo, logWarn } from './logger';
-import { getPoolSnapshot, PoolSnapshot } from './bitflow';
+import { checkEngineTip, getPoolSnapshot, PoolSnapshot, TipCheck } from './bitflow';
 import { RebalancePlan, executePlan, logPlan } from './plan';
 import { withdrawLiquidity } from './primitives';
 import { microToString } from './stacks';
@@ -268,10 +268,12 @@ export const runTick = async (): Promise<TickResult> => {
 
   let snapshot: PoolSnapshot;
   let feedRes: Awaited<typeof feedOutcome>;
+  let tip: TipCheck;
   try {
-    [snapshot, feedRes] = await Promise.all([
+    [snapshot, feedRes, tip] = await Promise.all([
       getPoolSnapshot(CONFIG.POOL_ID, CONFIG.SIGNER_ADDRESS),
       feedOutcome,
+      checkEngineTip(),
     ]);
   } catch (err) {
     const message = (err as Error).message;
@@ -307,8 +309,19 @@ export const runTick = async (): Promise<TickResult> => {
     `[${TAG}] wallet ${qLabel}=${qFmt(walletQuote)} ${bLabel}=${bFmt(walletBase)} owned_bins=${snapshot.ownedBinCount}`,
   );
 
-  if (!snapshot.poolActive) {
-    logWarn(`[${TAG}] GUARDRAIL pool_inactive pool="${snapshot.poolId}" -> hold (not trading)`);
+  // Both are "conditions aren't right to trade", not failures: hold the tick
+  // rather than counting an API error, and let a later tick pick it up.
+  const holdReason = !snapshot.poolActive
+    ? 'pool_inactive'
+    : !tip.fresh
+      ? 'stale_tip'
+      : null;
+  if (holdReason) {
+    logWarn(
+      holdReason === 'pool_inactive'
+        ? `[${TAG}] GUARDRAIL pool_inactive pool="${snapshot.poolId}" -> hold (not trading)`
+        : `[${TAG}] GUARDRAIL stale_tip ${tip.reason} -> hold (quotes trail the chain)`,
+    );
     const durationSeconds = Number(((Date.now() - startMs) / 1000).toFixed(2));
     logInfo(`[${TAG}] tick_end id=${tickId} decision="hold" duration="${durationSeconds}s"`);
     return {
@@ -324,7 +337,7 @@ export const runTick = async (): Promise<TickResult> => {
       activeBinBase: base,
       imbalanceBps: 0,
       decision: 'hold',
-      reason: 'pool_inactive',
+      reason: holdReason,
       executed: false,
       durationSeconds,
       walletQuote,

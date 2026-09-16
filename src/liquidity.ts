@@ -32,7 +32,7 @@ import {
 } from './bitflow';
 import { CONFIG } from './config';
 import { logWarn } from './logger';
-import { microToString, parseContract } from './stacks';
+import { getBinTotalSupply, microToString, parseContract } from './stacks';
 import { allocateCurve, CurveLeg } from './strategy/curveShape';
 import { ExecutionContext } from './wallet';
 
@@ -472,6 +472,43 @@ export interface AddLiquidityRequest {
   yAmount: bigint;
 }
 
+// Quote v2 documents the ladder's `liquidity` as always null (today it is only
+// null out in the dust tail, but sizing must not depend on that holding). Bin
+// shares are the denominator minDlp is computed from, so a missing value has to
+// be resolved from the pool contract rather than read as zero: zero takes
+// calcAddSlippage down its empty-bin sqrt branch, which sizes the add as if it
+// were seeding the bin and can demand more DLP than the add can mint.
+// `get-total-supply` is keyed by the bin's NFT token-id, i.e. the unsigned id.
+export const resolveBinShares = async (
+  poolContract: string,
+  bins: PoolBin[],
+): Promise<Map<number, number>> => {
+  const shares = new Map<number, number>();
+  const missing: PoolBin[] = [];
+  for (const bin of bins) {
+    if (bin.liquidity === null || bin.liquidity === undefined) missing.push(bin);
+    else shares.set(Number(bin.bin_id), toNum(bin.liquidity));
+  }
+  if (missing.length === 0) return shares;
+
+  const resolved = await Promise.all(
+    missing.map(async (bin) => {
+      const total = await getBinTotalSupply(
+        poolContract,
+        Number(bin.bin_id),
+        CONFIG.SIGNER_ADDRESS,
+      );
+      return [Number(bin.bin_id), Number(total)] as const;
+    }),
+  );
+  for (const [id, total] of resolved) shares.set(id, total);
+  logWarn(
+    `[${TAG}] ladder liquidity missing for ${missing.length} bin(s); read shares on-chain ` +
+      `bins="${missing.map((b) => b.bin_id).join(',')}"`,
+  );
+  return shares;
+};
+
 export const prepareAddLiquidity = async (req: AddLiquidityRequest): Promise<PreparedCall> => {
   const [quotes, binsRes] = await Promise.all([
     fetchQuotesPool(req.poolId),
@@ -492,6 +529,7 @@ export const prepareAddLiquidity = async (req: AddLiquidityRequest): Promise<Pre
   if (!bin) throw new Error(`bin ${targetBin} not found in pool ${req.poolId}`);
 
   const fees = poolFeesFrom(quotes);
+  const shares = await resolveBinShares(quotes.pool_token, [bin]);
 
   const slip = calcAddSlippage(
     {
@@ -499,7 +537,7 @@ export const prepareAddLiquidity = async (req: AddLiquidityRequest): Promise<Pre
       binPriceScaled: toNum(bin.price),
       reserveX: toNum(bin.reserve_x),
       reserveY: toNum(bin.reserve_y),
-      binShares: toNum(bin.liquidity),
+      binShares: shares.get(targetBin) ?? 0,
       xAmount: Number(xAmount),
       yAmount: Number(yAmount),
     },
@@ -798,6 +836,10 @@ export const prepareShapedAddLiquidity = async (req: ShapedAddRequest): Promise<
   }
 
   // Second pass: per-bin slippage on the (possibly capped) amounts.
+  const shares = await resolveBinShares(
+    quotes.pool_token,
+    raw.filter((r) => r.x > BigInt(0) || r.y > BigInt(0)).map((r) => r.bin),
+  );
   const positions: AddPosition[] = [];
   for (const r of raw) {
     if (r.x <= BigInt(0) && r.y <= BigInt(0)) continue;
@@ -807,7 +849,7 @@ export const prepareShapedAddLiquidity = async (req: ShapedAddRequest): Promise<
         binPriceScaled: toNum(r.bin.price),
         reserveX: toNum(r.bin.reserve_x),
         reserveY: toNum(r.bin.reserve_y),
-        binShares: toNum(r.bin.liquidity),
+        binShares: shares.get(r.binId) ?? 0,
         xAmount: Number(r.x),
         yAmount: Number(r.y),
       },

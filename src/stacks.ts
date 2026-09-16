@@ -5,6 +5,7 @@ import {
   parseReadOnlyResponse,
   standardPrincipalCV,
   contractPrincipalCV,
+  uintCV,
 } from '@stacks/transactions';
 import { CONFIG } from './config';
 
@@ -121,6 +122,17 @@ export const fetchJson = async <T = unknown>(
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} (${url})`);
     return (await res.json()) as T;
   }, CONFIG.STACKS_CALL_MAX_RETRIES);
+};
+
+// Total shares outstanding in one bin, straight from the pool. Bins are SIP-013
+// token-ids on the pool contract, keyed by the unsigned id.
+export const getBinTotalSupply = async (
+  poolContract: string,
+  binId: number,
+  sender: string,
+): Promise<bigint> => {
+  const res = await callReadOnly(poolContract, 'get-total-supply', [uintCV(binId)], sender);
+  return cvToBigInt((res as { value?: unknown }).value ?? res);
 };
 
 // Same as fetchJson but treats 404 as a legitimate "nothing here" answer rather
