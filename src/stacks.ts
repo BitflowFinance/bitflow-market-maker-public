@@ -5,6 +5,7 @@ import {
   parseReadOnlyResponse,
   standardPrincipalCV,
   contractPrincipalCV,
+  uintCV,
 } from '@stacks/transactions';
 import { CONFIG } from './config';
 
@@ -118,6 +119,34 @@ export const fetchJson = async <T = unknown>(
   if (apiKey) headers['X-API-Key'] = apiKey;
   return retry(async () => {
     const res = await fetch(url, { headers });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} (${url})`);
+    return (await res.json()) as T;
+  }, CONFIG.STACKS_CALL_MAX_RETRIES);
+};
+
+// Total shares outstanding in one bin, straight from the pool. Bins are SIP-013
+// token-ids on the pool contract, keyed by the unsigned id.
+export const getBinTotalSupply = async (
+  poolContract: string,
+  binId: number,
+  sender: string,
+): Promise<bigint> => {
+  const res = await callReadOnly(poolContract, 'get-total-supply', [uintCV(binId)], sender);
+  return cvToBigInt((res as { value?: unknown }).value ?? res);
+};
+
+// Same as fetchJson but treats 404 as a legitimate "nothing here" answer rather
+// than a failure to retry, for endpoints that 404 instead of returning an empty
+// collection.
+export const fetchJsonAllowMissing = async <T = unknown>(
+  url: string,
+  apiKey = '',
+): Promise<T | null> => {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['X-API-Key'] = apiKey;
+  return retry(async () => {
+    const res = await fetch(url, { headers });
+    if (res.status === 404) return null;
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} (${url})`);
     return (await res.json()) as T;
   }, CONFIG.STACKS_CALL_MAX_RETRIES);

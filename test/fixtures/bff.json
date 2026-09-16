@@ -1,0 +1,424 @@
+{
+  "_note": "Real mainnet payloads captured 2026-09-15 from dlmm_1 (sBTC/USDCx). Do not hand-edit.",
+  "v1": {
+    "pool": {
+      "pool_id": "dlmm_1",
+      "amm_type": "dlmm",
+      "token_x": "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token",
+      "token_y": "SP120SBRBQJ00MCWS7TM5R8WJNTTKD5K0HFRC2CNE.usdcx",
+      "bin_step": 10,
+      "active_bin": 639,
+      "active": true,
+      "pool_status": "true",
+      "x_protocol_fee": 25,
+      "x_provider_fee": 25,
+      "x_variable_fee": 0,
+      "y_protocol_fee": 25,
+      "y_provider_fee": 25,
+      "y_variable_fee": 0,
+      "types": [
+        "ALL_POOLS",
+        "DLMM"
+      ],
+      "sbtc_incentives": false,
+      "suggested": false,
+      "initial_price": "66194479380",
+      "pool_name": "sBTC-USDCx-LP",
+      "pool_symbol": "sBTC-USDCx",
+      "pool_uri": "https://bitflow.finance",
+      "creation_height": "939054",
+      "variable_fees_manager": "SP3ESW1QCNQPVXJDGQWT7E45RDCH38QBK9HEJSX4X",
+      "fee_address": "SP3ESW1QCNQPVXJDGQWT7E45RDCH38QBK9HEJSX4X",
+      "variable_fees_cooldown": "0",
+      "freeze_variable_fees_manager": "false",
+      "core_address": "SP1PFR4V08H1RAZXREBGFFQ59WB739XM8VVGTFSEA.dlmm-core-v-1-1",
+      "pool_token": "SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-pool-sbtc-usdcx-v-1-bps-10",
+      "creator": "SP3ESW1QCNQPVXJDGQWT7E45RDCH38QBK9HEJSX4X",
+      "x_total_fee_bps": "50",
+      "y_total_fee_bps": "50"
+    },
+    "bins": {
+      "success": true,
+      "pool_id": "dlmm_1",
+      "bins": [
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 1,
+          "reserve_x": "0",
+          "reserve_y": "50",
+          "price": "40199171906",
+          "liquidity": "1000"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 3,
+          "reserve_x": "0",
+          "reserve_y": "50",
+          "price": "40279610776",
+          "liquidity": "1000"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 637,
+          "reserve_x": "0",
+          "reserve_y": "987984772",
+          "price": "75908496060",
+          "liquidity": "1065447651"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 638,
+          "reserve_x": "0",
+          "reserve_y": "993003523",
+          "price": "75984404580",
+          "liquidity": "1059933136"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 639,
+          "reserve_x": "628233",
+          "reserve_y": "325335914",
+          "price": "76060388561",
+          "liquidity": "875677956"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 640,
+          "reserve_x": "1110097",
+          "reserve_y": "0",
+          "price": "76136449327",
+          "liquidity": "926909316"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 641,
+          "reserve_x": "1107816",
+          "reserve_y": "0",
+          "price": "76212585555",
+          "liquidity": "916038444"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 664,
+          "reserve_x": "2618844",
+          "reserve_y": "0",
+          "price": "77984892433",
+          "liquidity": "695014326"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 665,
+          "reserve_x": "2044107",
+          "reserve_y": "0",
+          "price": "78062877473",
+          "liquidity": "540779927"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 666,
+          "reserve_x": "1722905",
+          "reserve_y": "0",
+          "price": "78140939961",
+          "liquidity": "456239061"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 667,
+          "reserve_x": "1514699",
+          "reserve_y": "0",
+          "price": "78219081220",
+          "liquidity": "401593564"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 668,
+          "reserve_x": "1389708",
+          "reserve_y": "0",
+          "price": "78297299926",
+          "liquidity": "374857715"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 669,
+          "reserve_x": "1316395",
+          "reserve_y": "0",
+          "price": "78375597404",
+          "liquidity": "353014436"
+        }
+      ],
+      "total_bins": 1001,
+      "active_bin_id": 639,
+      "applied_block_height": 8999170,
+      "price_source": "snapshot",
+      "snapshot_age_seconds": 73,
+      "redis_active_bin_block_height": 8999086,
+      "data_age_seconds": 73,
+      "active_bin_price": "76060388561",
+      "error": null
+    },
+    "positions": {
+      "bins": [
+        {
+          "bin_id": "664",
+          "price": 77984892433,
+          "userLiquidity": 372231798
+        },
+        {
+          "bin_id": "665",
+          "price": 78062877473,
+          "userLiquidity": 222669241
+        },
+        {
+          "bin_id": "666",
+          "price": 78140939961,
+          "userLiquidity": 133729981
+        },
+        {
+          "bin_id": "667",
+          "price": 78219081220,
+          "userLiquidity": 80336141
+        },
+        {
+          "bin_id": "668",
+          "price": 78297299926,
+          "userLiquidity": 49039643
+        },
+        {
+          "bin_id": "669",
+          "price": 78375597404,
+          "userLiquidity": 29252365
+        }
+      ]
+    }
+  },
+  "v2": {
+    "pool": {
+      "pool_id": "SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-pool-sbtc-usdcx-v-1-bps-10",
+      "amm_type": "dlmm",
+      "token_x": "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token",
+      "token_y": "SP120SBRBQJ00MCWS7TM5R8WJNTTKD5K0HFRC2CNE.usdcx",
+      "bin_step": 10,
+      "active_bin": 139,
+      "active": true,
+      "quotable": true,
+      "pool_status": "active",
+      "x_protocol_fee": 25,
+      "x_provider_fee": 25,
+      "x_variable_fee": 0,
+      "y_protocol_fee": 25,
+      "y_provider_fee": 25,
+      "y_variable_fee": 0,
+      "types": null,
+      "sbtc_incentives": null,
+      "suggested": null,
+      "initial_price": null,
+      "pool_name": "sbtc-usdcx-LP",
+      "pool_symbol": "sbtc-usdcx",
+      "pool_uri": "SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-pool-sbtc-usdcx-v-1-bps-10",
+      "creation_height": null,
+      "variable_fees_manager": null,
+      "fee_address": null,
+      "variable_fees_cooldown": null,
+      "freeze_variable_fees_manager": null,
+      "core_address": null,
+      "pool_token": null,
+      "creator": null,
+      "x_total_fee_bps": "50",
+      "y_total_fee_bps": "50",
+      "reserve_x": "76052879",
+      "reserve_y": "18856582002",
+      "total_shares": null,
+      "staking_contract": null,
+      "emissions_contract": null,
+      "tokens_emitted": null,
+      "reward_tokens": null,
+      "is_organic_yield": null,
+      "is_single_sided": null,
+      "points_multiple": null,
+      "lp_decimals": null,
+      "asset_name": null,
+      "token_x_id": null,
+      "token_y_id": null
+    },
+    "bins": {
+      "success": true,
+      "pool_id": "dlmm_1",
+      "bins": [
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": -499,
+          "reserve_x": "0",
+          "reserve_y": "50",
+          "price": "40199171906",
+          "liquidity": null
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": -497,
+          "reserve_x": "0",
+          "reserve_y": "50",
+          "price": "40279610776",
+          "liquidity": null
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 137,
+          "reserve_x": "0",
+          "reserve_y": "987984772",
+          "price": "75908496060",
+          "liquidity": "1065447651"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 138,
+          "reserve_x": "0",
+          "reserve_y": "993003523",
+          "price": "75984404580",
+          "liquidity": "1059933136"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 139,
+          "reserve_x": "628233",
+          "reserve_y": "325335914",
+          "price": "76060388561",
+          "liquidity": "875677956"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 140,
+          "reserve_x": "1110097",
+          "reserve_y": "0",
+          "price": "76136449327",
+          "liquidity": "926909316"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 141,
+          "reserve_x": "1107816",
+          "reserve_y": "0",
+          "price": "76212585555",
+          "liquidity": "916038444"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 164,
+          "reserve_x": "2618844",
+          "reserve_y": "0",
+          "price": "77984892433",
+          "liquidity": "695014326"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 165,
+          "reserve_x": "2044107",
+          "reserve_y": "0",
+          "price": "78062877473",
+          "liquidity": "540779927"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 166,
+          "reserve_x": "1722905",
+          "reserve_y": "0",
+          "price": "78140939961",
+          "liquidity": "456239061"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 167,
+          "reserve_x": "1514699",
+          "reserve_y": "0",
+          "price": "78219081220",
+          "liquidity": "401593564"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 168,
+          "reserve_x": "1389708",
+          "reserve_y": "0",
+          "price": "78297299926",
+          "liquidity": "374857715"
+        },
+        {
+          "pool_id": "dlmm_1",
+          "bin_id": 169,
+          "reserve_x": "1316395",
+          "reserve_y": "0",
+          "price": "78375597404",
+          "liquidity": "353014436"
+        }
+      ],
+      "total_bins": 1001,
+      "active_bin_id": 139,
+      "error": null
+    },
+    "currentBins": {
+      "poolContract": "SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-pool-sbtc-usdcx-v-1-bps-10",
+      "poolAlias": "SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-pool-sbtc-usdcx-v-1-bps-10",
+      "principal": "SP15VM42Q85WEKQFW9NQDKKCFNJF2NG2VBTPR6CBR",
+      "asOfHeight": 8999361,
+      "indexBlockHash": "0xa70618d8229615a4af717c4290f051c362ec90fff70b7f5900b41ddd8f29105d",
+      "chainTip": 8999359,
+      "tipLag": 0,
+      "finality": "anchored",
+      "source": "memory-join",
+      "complete": true,
+      "clean": true,
+      "reservesComplete": true,
+      "overallUserShares": "887259169",
+      "activeBinIdUnsigned": 639,
+      "activeBinIdSigned": 139,
+      "bins": [
+        {
+          "binIdUnsigned": 664,
+          "binIdSigned": 164,
+          "userShares": "372231798",
+          "binShares": "695014326",
+          "reserveX": "2618844",
+          "reserveY": "0"
+        },
+        {
+          "binIdUnsigned": 665,
+          "binIdSigned": 165,
+          "userShares": "222669241",
+          "binShares": "540779927",
+          "reserveX": "2044107",
+          "reserveY": "0"
+        },
+        {
+          "binIdUnsigned": 666,
+          "binIdSigned": 166,
+          "userShares": "133729981",
+          "binShares": "456239061",
+          "reserveX": "1722905",
+          "reserveY": "0"
+        },
+        {
+          "binIdUnsigned": 667,
+          "binIdSigned": 167,
+          "userShares": "80336141",
+          "binShares": "401593564",
+          "reserveX": "1514699",
+          "reserveY": "0"
+        },
+        {
+          "binIdUnsigned": 668,
+          "binIdSigned": 168,
+          "userShares": "49039643",
+          "binShares": "374857715",
+          "reserveX": "1389708",
+          "reserveY": "0"
+        },
+        {
+          "binIdUnsigned": 669,
+          "binIdSigned": 169,
+          "userShares": "29252365",
+          "binShares": "353014436",
+          "reserveX": "1316395",
+          "reserveY": "0"
+        }
+      ]
+    }
+  }
+}
