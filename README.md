@@ -1,5 +1,7 @@
 # Bitflow curve market maker
 
+> **Mainnet, real funds.** This bot signs transactions with your private key and deploys your tokens into live pools. It is provided as is, without warranty, and has not been independently audited. Nothing in this repository is financial advice, and no outcome is guaranteed. Every value in the env files is a default, not a recommendation. You are responsible for your keys, your positions, and any losses. Start small and read [SECURITY.md](./SECURITY.md) and [docs/RECOVERY.md](./docs/RECOVERY.md) before going live.
+
 A TypeScript market maker for **Bitflow DLMM** pools on Stacks. This public edition is built for the two competition pairs:
 
 | Pair | Profile | Pool | Strategy |
@@ -32,14 +34,39 @@ Continuous knobs on every shaped add:
 - **M4 pull-bids / M6 bid-lean** — scale the cash (quote) side by `bidFraction` from the inventory fraction `f = V/(V+C)`.
 - **M5 hard-cap de-risk** — when `f` breaches `F_HARD` and markets are healthy, sell base→quote toward `F_SOFT`, throttled by `DERISK_MAX_FRACTION`. Requires `ENABLE_SWAP=true`.
 
-Safety halts: `broken_market` (peg break or divergence past `DIVERGENCE_HALT_BPS` → withdraw, hold inventory) and `operational` (stale reference feed → withdraw, stop quoting).
+Safety halts: `broken_market` (peg break or divergence past `DIVERGENCE_HALT_BPS`) and `operational` (stale reference feed). Both freeze the loop and clear on their own when the reading recovers. Existing bins are withdrawn on a halt only when `BREAKER_WITHDRAW_ALL=true`; otherwise they stay deployed. See [docs/RECOVERY.md](./docs/RECOVERY.md).
+
+## Prerequisites
+
+What you need before `npm install`. Facts only; how much to fund is your decision.
+
+1. **Node.js 20 or newer.**
+2. **A dedicated Stacks account.** Create a fresh account in a Stacks wallet (Leather, Xverse or similar) and use it only for this bot. Never point the bot at a wallet that holds anything else. Its `SP...` address is `SIGNER_ADDRESS`.
+3. **Its private key as hex** for `SIGNER_KEY`. Some wallet apps can show or copy an account's private key directly. If yours only shows the seed phrase, derive the key on a machine that is offline and never paste the seed phrase anywhere else:
+
+   ```bash
+   npm install --no-save @stacks/wallet-sdk
+   SEED="<your-seed-phrase-here>" node -e "require('@stacks/wallet-sdk').generateWallet({secretKey: process.env.SEED, password: ''}).then(w => console.log(w.accounts[0].stxPrivateKey))"
+   ```
+
+   Be sure to clear the shell history after running the commands above. In live mode the bot refuses to start if the key does not derive to `SIGNER_ADDRESS`, so a mistake here fails safe.
+4. **STX for gas** in that account. Each transaction costs between `MIN_TX_FEE_USTX` and `MAX_TX_FEE_USTX` (0.05 to 0.15 STX by default in the pair files), and the bot keeps `STX_GAS_RESERVE_USTX` (5 STX by default) undeployed at all times. For the STX/USDCx pool the same STX balance is also the inventory.
+5. **Both pool tokens** in that account. The bot does not bootstrap a one-sided wallet well: its default target is `F_STAR` (0.38) of deployed value in the base token, and if you start above `F_HARD` (0.67) in base with `ENABLE_SWAP=true` the first live tick may sell base for quote.
+   - **sBTC** (sBTC/USDCx pool): deposit BTC through the official sBTC bridge, or swap into it on Bitflow.
+   - **USDCx** (both pools): bridged USDC on Stacks. Acquire it through its issuer's official route or swap into it on Bitflow.
+   - **STX** (STX/USDCx pool): any exchange that supports Stacks withdrawals.
+
+   Whichever route you use, verify the contract address of the token you receive matches the contract address of the token in the pair file (`BASE_TOKEN_CONTRACT` / `QUOTE_TOKEN_CONTRACT`).
+
+No API keys are needed. `BFF_API_KEY` can stay blank. `STACKS_NODE_URL` can stay blank too; the bot then uses the public Hiro API, which is rate limited. Set your own node or a paid endpoint if you see `429` errors in the log.
 
 ## Setup
 
 ```bash
 npm install
 cp .env.sbtc.example .env.sbtc   # or .env.stx.example -> .env.stx
-# Fill SIGNER_ADDRESS. For live, also SIGNER_KEY (must match) and STACKS_NODE_URL.
+# Fill SIGNER_ADDRESS. For live, also SIGNER_KEY (must match).
+# STACKS_NODE_URL and BFF_API_KEY are optional (see Prerequisites).
 # Token asset names + decimals are resolved from the BFF at startup.
 ```
 
@@ -110,14 +137,28 @@ npm run backtest
 npm run fees
 ```
 
-## First live test
+## Pre-flight (before the first live tick)
 
-1. Fund the wallet with a small amount of the pool's tokens plus STX for gas.
-2. Set `EXECUTION_MODE=live`, `SIGNER_ADDRESS`, `SIGNER_KEY`.
-3. Set a small `MAX_POSITION_USTX` to test with first.
-4. Set `KILL_SWITCH_FILE` so you can halt without a restart.
-5. Run one tick: `EXECUTION_MODE=live node dist/index.js --once --pool sbtc`.
-6. Start the loop and watch logs.
+Tick every box. Any `no` means do not go live yet.
+
+```
+[ ] npm test and npm run build pass
+[ ] Dry-run tick clean: npm run tick -- --pool sbtc ends with decision="hold" or
+    "rebalance" plus "dry_run: plan logged", not "frozen" or an error
+[ ] The tick's `wallet` line shows both tokens and the `active_bin` line shows a price
+[ ] The tick's `ref price` line shows d_bps below DIVERGENCE_WARN_BPS
+[ ] Wallet STX covers STX_GAS_RESERVE_USTX plus a few transactions
+[ ] MAX_POSITION_USTX set to a small amount for the first run (0 means no cap)
+[ ] KILL_SWITCH_FILE set, and you know the path, so you can halt without a restart
+[ ] METRICS_HTTP_HOST is 127.0.0.1 (the default) and the port is not exposed
+[ ] EXECUTION_MODE=live and SIGNER_KEY set only in the pair env file, nowhere else
+[ ] One live tick before the loop:
+      EXECUTION_MODE=live node dist/index.js --once --pool sbtc
+    Startup must log "signer key/address check passed"; then confirm the
+    transactions in an explorer before starting the loop
+```
+
+Then start the loop with `node dist/index.js --pool sbtc` and watch the log. If anything looks wrong, `touch` the kill-switch file first, then read [docs/RECOVERY.md](./docs/RECOVERY.md).
 
 ## Key config
 
@@ -137,3 +178,9 @@ npm run fees
 | `COINGECKO_REFERENCE_ID` | `bitcoin` (sBTC) or `blockstack` (STX) |
 
 See `.env.example` and the pair files for the full list.
+
+## Related
+
+- [docs/RECOVERY.md](./docs/RECOVERY.md): halt and resume, self-halts, stuck transactions, full exit, restart.
+- [SECURITY.md](./SECURITY.md): key handling and the metrics port.
+- [Guides for AI Bitcoin Agents](https://github.com/k9dreamer-graphite-elan/guides-for-ai-bitcoin-agents) (community edition, unofficial): handbook, runbooks and per-pool notes for [dlmm_1](https://github.com/k9dreamer-graphite-elan/guides-for-ai-bitcoin-agents/blob/main/public/hodlmm/knowledge/pools/dlmm_1.md) and [dlmm_14](https://github.com/k9dreamer-graphite-elan/guides-for-ai-bitcoin-agents/blob/main/public/hodlmm/knowledge/pools/dlmm_14.md). Optional reading; this bot does not depend on it or on any external skills.
