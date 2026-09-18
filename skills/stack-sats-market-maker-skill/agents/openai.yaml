@@ -1,0 +1,11 @@
+# Codex / ChatGPT desktop metadata (learn.chatgpt.com/docs/build-skills). Claude Code ignores this file.
+# Icons are not shipped yet; add icon_small (SVG) and icon_large (PNG) under assets/ when brand supplies them.
+interface:
+  display_name: "Stack Sats Market Maker"
+  short_description: "Set up and run the Bitflow market-making starter kit on Stack Sats on Bitflow, one pool or both."
+  # Bitflow app primary: hsl(169.4 100% 41%) from app.bitflow.finance stylesheets, read 09/18/26
+  brand_color: "#00D1AC"
+  default_prompt: "Help me run the Bitflow market maker for Stack Sats on Bitflow."
+policy:
+  # Default: Codex may pick this skill on its own when a request matches the description.
+  allow_implicit_invocation: true
