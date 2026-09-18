@@ -182,5 +182,6 @@ See `.env.example` and the pair files for the full list.
 ## Related
 
 - [docs/RECOVERY.md](./docs/RECOVERY.md): halt and resume, self-halts, stuck transactions, full exit, restart.
+- [docs/RUNBOOK.md](./docs/RUNBOOK.md): a runbook to hand to an AI agent that will set the bot up for you, one pool or both, with the owner-only steps (account, funding, key, enrollment, go) called out.
 - [SECURITY.md](./SECURITY.md): key handling and the metrics port.
 - [Guides for AI Bitcoin Agents](https://github.com/k9dreamer-graphite-elan/guides-for-ai-bitcoin-agents) (community edition, unofficial): handbook, runbooks and per-pool notes for [dlmm_1](https://github.com/k9dreamer-graphite-elan/guides-for-ai-bitcoin-agents/blob/main/public/hodlmm/knowledge/pools/dlmm_1.md) and [dlmm_14](https://github.com/k9dreamer-graphite-elan/guides-for-ai-bitcoin-agents/blob/main/public/hodlmm/knowledge/pools/dlmm_14.md). Optional reading; this bot does not depend on it or on any external skills.
