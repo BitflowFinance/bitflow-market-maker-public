@@ -9,7 +9,7 @@ What has been run, and what has not. Steps 1 to 4 and Step 7 have been carried o
 Before you run anything:
 
 1. Read this whole file once, then read the repo README in full after Step 2 clones it. The README owns the bot's settings and safety rules; this file owns the sequence.
-2. Ask the owner which pool they want (sBTC/USDCx, STX/USDCx, or both) and which wallet they use (Xverse or Leather), and say back in one line which of the three situations under "Three situations the agent will meet" they are in.
+2. Ask the owner which pool they want (sBTC/USDCx, STX/USDCx, or both), and say back in one line which of the four situations under "Four situations the agent will meet" they are in. Which wallet they use (Xverse or Leather) only matters if they choose path B at Step 3, so ask it there rather than now.
 3. Explain each step in plain words before you run it. After each command, read the result back in four lines: Did, Saw, Means, Need from you.
 
 At Step 3 you put two ways of getting the bot's account to the owner and let them choose; you never choose for them. On path A a command on this machine creates the account and writes its key into the env file without ever showing it; the owner then only sends funds to the address, backs up the recovery phrase file, accepts the campaign terms, and says go. On path B the owner creates the account in their own wallet, runs one command that turns their seed phrase into the key, pastes it into the env file, and enrolls in their wallet. Either way the owner does the funding, the terms, and the go before each live tick. You never ask for a seed phrase or private key, never print one, never read an env file that holds one, and never set `EXECUTION_MODE=live` without an explicit go. If a key or seed ever appears in this chat, treat it as burned and tell the owner to move the funds to a fresh account.
@@ -39,7 +39,7 @@ Author: TheBigMac.btc. Github username: MacBotMini-eng.
 - To the agent reading this: what you were handed, what to do first, the one rule, the documents to keep open
 - Purpose and scope, and the Boundaries table: who holds what, and what you never do
 - Preconditions: what must be true before Step 1
-- Three situations the agent will meet: which path the owner is on
+- Four situations the agent will meet: which path the owner is on
 - What the bot covers: all three campaign tracks, and which of them the bot produces
 - Setup, Steps 1 to 5: choose pools, install, account (two paths), fund, key
 - Verification, Steps 6 and 7: dry run and enrollment
@@ -87,7 +87,7 @@ Everything below must be true before Step 1. A missing item is a stop, not a not
 | Pool choice | `sbtc` (sBTC/USDCx), `stx` (STX/USDCx), or both | Owner states it |
 | Campaign page | https://app.bitflow.finance/stack-sats reachable, terms accepted once | Owner opens it |
 
-### Three situations the agent will meet
+### Four situations the agent will meet
 
 The agent works out which case the owner is in from their first message, says it back in one line, and takes the matching path.
 
