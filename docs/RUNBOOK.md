@@ -4,6 +4,8 @@
 
 You have been handed this file by the owner of a Stacks wallet who wants to run Bitflow's market-making starter kit (https://github.com/BitflowFinance/bitflow-market-maker-public) on Stack Sats on Bitflow (https://app.bitflow.finance/stack-sats). This runbook is your procedure: the order of operations, the check after each step, and what to do when a check fails. Nothing else needs to be installed; every command is the repo's own, a `curl` against a public API, or a one-line shell edit.
 
+What has been run, and what has not. Steps 1 to 4 and Step 7 have been carried out end to end on mainnet with funded accounts, including creating an account by command and enrolling it. Four branches have NOT been exercised yet and are drafts until someone runs them: pasting a key derived from a wallet seed (Step 5, path B), the dry run (Step 6), the first live tick and the loop (Step 8), and the withdraw path in Stop, halt and exit. Follow them as written, read each result back to the owner rather than assuming it, and tell the owner when a step is one of these four. If you are the first to run one, say what actually happened so the next reader gets a tested step.
+
 Before you run anything:
 
 1. Read this whole file once, then read the repo README in full after Step 2 clones it. The README owns the bot's settings and safety rules; this file owns the sequence.
@@ -31,6 +33,20 @@ The rest of this file is the runbook.
 2026-09-18
 
 Author: TheBigMac.btc. Github username: MacBotMini-eng.
+
+## Contents
+
+- To the agent reading this: what you were handed, what to do first, the one rule, the documents to keep open
+- Purpose and scope, and the Boundaries table: who holds what, and what you never do
+- Preconditions: what must be true before Step 1
+- Three situations the agent will meet: which path the owner is on
+- What the bot covers: all three campaign tracks, and which of them the bot produces
+- Setup, Steps 1 to 5: choose pools, install, account (two paths), fund, key
+- Verification, Steps 6 and 7: dry run and enrollment
+- Go live, Step 8: the pre-flight list, one live tick, then the loop
+- Operate, Step 9: reading the bot and the campaign back
+- Stop, halt and exit: the three ways to stop, gentlest first
+- Troubleshooting: symptom, cause, fix
 
 ## Purpose and scope
 
@@ -117,18 +133,19 @@ Setting `ENABLE_SWAP=false` in the env file turns the automatic de-risk off; the
 
 ## Setup: Steps 1 to 5
 
-Run the steps in order, once per pool. Each step names who acts and what output ends it.
+Run the steps in order, once per pool. Each step names who acts and what output ends it. Copy this checklist into your reply and tick each line as you finish it; a second pool repeats Steps 3 to 8 with its own account, env file and terminal.
 
-```mermaid
-flowchart LR
-  A[1 Choose pools] --> B[2 Install kit]
-  B --> C[3 Account per pool: A or B]
-  C --> D[4 Fund it]
-  D --> E[5 Key into env file, path B only]
-  E --> F[6 Dry run]
-  F --> G[7 Enroll]
-  G --> H[8 Go live]
-  H --> I[9 Watch]
+```
+Setup progress, <pool> pool:
+- [ ] Step 1: pools chosen (sbtc, stx, or both)
+- [ ] Step 2: kit installed, 130 tests passing, README read
+- [ ] Step 3: account in place (path A created by command, or path B from the owner's wallet)
+- [ ] Step 4: funded, both sides of the pair present, gas above the reserve
+- [ ] Step 5: key in the env file (path A: already done at Step 3)
+- [ ] Step 6: dry run ends "plan logged, no transactions sent"
+- [ ] Step 7: enrolled, timestamp read back
+- [ ] Step 8: pre-flight walked, owner said go, one live tick confirmed on chain, loop started
+- [ ] Step 9: watching; bot health and campaign standing read back to the owner
 ```
 
 The owner chooses at 3, funds at 4, pastes a key at 5 on path B only, and accepts the terms at 7; the agent runs everything else and checks after each owner step.
