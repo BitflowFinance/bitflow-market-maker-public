@@ -1,6 +1,6 @@
 # stack-sats-market-maker-skill
 
-> **Mainnet, real funds.** This skill operates the bot in this repository. The notice at the top of the root README applies in full: as is, no warranty, not financial advice, you are responsible for your keys, positions and losses.
+> **Mainnet, real funds.** This skill operates a bot that signs transactions with your private key and deploys your tokens into live pools. It is provided as is, without warranty, and has not been independently audited. Nothing in this skill is financial advice, and no outcome is guaranteed. Every value in the env files is a default, not a recommendation. You are responsible for your keys, your positions, and any losses. Start small and read the bot's SECURITY.md and docs/RECOVERY.md before going live.
 
 This folder is an Agent Skill in the open Agent Skills format (agentskills.io). Claude Code and Codex both read it. Everything the agent needs is in `SKILL.md`; this file only says how to install the folder and what the agent is allowed to do.
 
@@ -8,7 +8,7 @@ This folder is an Agent Skill in the open Agent Skills format (agentskills.io). 
 
 The boundary is: the skill turns the agent into the bot's operator, never into the bot. The repo is the bot. The skill installs it, configures it, gates it, and reads it. The loop runs as its own process and makes every trading decision on its own. The agent never places a trade by its own judgment.
 
-The agent never sees, prints or derives a private key or seed phrase, never sets `EXECUTION_MODE=live` without the owner's explicit go, never changes the bot's strategy, never creates a wallet, and never drives the owner's wallet or browser.
+The agent never sees, prints or derives a private key or seed phrase, never sets `EXECUTION_MODE=live` without the owner's explicit go, never changes the bot's strategy, creates an account for the bot only through `create_bot_account.sh` (which prints the address and nothing else), and never drives the owner's wallet or browser.
 
 ## Install
 
@@ -40,7 +40,7 @@ Node.js 20 or newer, git, curl, python3, internet access. The scripts in `script
 
 ## License
 
-MIT, under the repository's root `LICENSE`.
+MIT, copyright 2026 Bitflow, the same license as the bot repo; see `LICENSE`. The license's as-is clause is the liability disclaimer in legal form; the notice at the top of this file is its plain-language version.
 
 ## Overview
 

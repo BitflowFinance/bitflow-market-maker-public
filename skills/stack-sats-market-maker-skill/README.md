@@ -10,15 +10,15 @@ The boundary is: the skill turns the agent into the bot's operator, never into t
 ## What it does
 
 1. Installs the repo for the user (`scripts/install.sh`: clone, `npm install`, type-check, tests).
-2. Writes each pool's env file with the user's signer address and a kill-switch path.
-3. Hands the private key step to the user: prints the derivation command with the right account number, opens the env file at the `SIGNER_KEY=` line for the paste, verifies without printing.
+2. Asks how the bot gets its account, and never picks for the user. Path A: creates a fresh account by script, key written straight into the env file, 24-word recovery phrase to a file for the user to back up, only the address shown. Path B: writes the address of an account from the user's own wallet, then opens the env file for the user to paste that account's key and verifies it without printing.
+3. Enrolls the account in Stack by Trading and Stack by Market Making by script once the user has accepted the campaign terms, or checks an enrollment the user signed in their wallet.
 4. Dry-runs each pool and reads the decision back.
 5. Checks enrollment, balances, transactions and the campaign reading.
 6. Gates going live behind the README pre-flight list and the user's explicit go, one pool at a time.
 
 ## What it never does
 
-Sees or derives a key, goes live without the go, changes the bot's strategy, runs a Manual CLI swap unasked, creates a wallet, or drives the user's wallet or browser.
+Sees or derives a key, goes live without the go, changes the bot's strategy, runs a Manual CLI swap unasked, shows a key or recovery phrase, or drives the user's wallet or browser.
 
 ## Layout
 
@@ -32,11 +32,11 @@ Track names and rules come from the campaign page; bot mechanics come from the r
 
 ## License
 
-MIT, under the repository's root `LICENSE`.
+MIT, copyright 2026 Bitflow, the same license as the bot repo; see `LICENSE`. The license's as-is clause is the liability disclaimer in legal form; the notice at the top of this file is its plain-language version.
 
 ## Disclaimer
 
-> **Mainnet, real funds.** This skill operates the bot in this repository. The notice at the top of the root README applies in full: as is, no warranty, not financial advice, you are responsible for your keys, positions and losses.
+> **Mainnet, real funds.** This skill operates a bot that signs transactions with your private key and deploys your tokens into live pools. It is provided as is, without warranty, and has not been independently audited. Nothing in this skill is financial advice, and no outcome is guaranteed. Every value in the env files is a default, not a recommendation. You are responsible for your keys, your positions, and any losses. Start small and read the bot's SECURITY.md and docs/RECOVERY.md before going live.
 
 ## Overview
 
