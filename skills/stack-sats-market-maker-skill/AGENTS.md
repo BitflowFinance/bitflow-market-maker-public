@@ -41,3 +41,40 @@ Node.js 20 or newer, git, curl, python3, internet access. The scripts in `script
 ## License
 
 MIT, under the repository's root `LICENSE`.
+
+## Overview
+
+### What this is
+
+The safe way to point an AI agent at Bitflow's market-making bot ([BitflowFinance/bitflow-market-maker-public](https://github.com/BitflowFinance/bitflow-market-maker-public)). The [campaign page](https://app.bitflow.finance/stack-sats) says "Point Claude or your bot of choice at the repo." This skill is what makes that sentence work: it gives Claude Code or Codex a fixed procedure, scripted checks, and hard stops, so the agent sets the bot up the way the README intends and never sees your key.
+
+### Why it exists
+
+The README is written for a person. An agent reading it alone hands you the first-account key command even when your bot account is not the first one, skips the paste-into-file step, and has nothing that stops it from going live on its own. The skill scripts those steps so they cannot be skipped, and gates going live behind the README's pre-flight checklist and your explicit go.
+
+### Who it is for:
+
+#### **1) Beginners:** 
+Someone who has never run a bot and does not want to learn the terminal to do it. The agent does the typing; you do the five things only you can do: create the account, fund it, derive the key offline, sign the enrollment, and say go.
+
+#### **2) Experienced:** 
+Someone who already runs bots and wants the setup repeatable across both pools and either wallet (Xverse or Leather) without re-reading the README each time.
+
+#### **3) Basically:**
+Anyone who wants a written boundary for what the agent is allowed to do with a funded account.
+
+### Who it is not for
+
+Anyone who wants the agent to trade. It will not. The loop in the repo makes every trading decision; the agent only installs, configures, checks, starts, watches and stops it.
+
+### What it covers
+
+One or both campaign pools (sBTC/USDCx and STX/USDCx), one wallet account per pool, from nothing to a running loop, plus reading the bot and the campaign back whenever asked. 
+
+#### All three tracks on the campaign page: 
+**Stack by Market Making** through the loop; 
+**The Daily Stack** and **Stack by Trading** through the SWAP(s) the bot makes on the way, and manual swaps only on operator's/user's say.
+
+### What the agent never does
+
+See or derive a key, go live without your go, change the bot's strategy or numbers, run a manual swap unasked, create a wallet, or drive your wallet or browser.
