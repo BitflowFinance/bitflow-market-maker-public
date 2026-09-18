@@ -1,7 +1,5 @@
 # stack-sats-market-maker-skill
 
-> **Mainnet, real funds.** This skill operates the bot in this repository. The notice at the top of the root README applies in full: as is, no warranty, not financial advice, you are responsible for your keys, positions and losses.
-
 Author: TheBigMac.btc  
 Github username: MacBotMini-eng
 
@@ -35,3 +33,7 @@ Track names and rules come from the campaign page; bot mechanics come from the r
 ## License
 
 MIT, under the repository's root `LICENSE`.
+
+## Disclaimer
+
+> **Mainnet, real funds.** This skill operates the bot in this repository. The notice at the top of the root README applies in full: as is, no warranty, not financial advice, you are responsible for your keys, positions and losses.

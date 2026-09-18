@@ -22,8 +22,19 @@ else open -W -t "$f"; fi
 chmod 600 "$f"
 if ! grep -q '^SIGNER_KEY=.\+' "$f"; then echo "no key found after SIGNER_KEY=; run this script again" >&2; exit 1; fi
 cd "$REPO"
-out=$(npm run tick -- --pool "$1" 2>&1 | grep -i -E 'signer=|mismatch|check passed' | grep -v -i 'key=' | head -3 || true)
-if echo "$out" | grep -qi mismatch; then
-  echo "The key you pasted belongs to a different account than this pool's address. Re-run the key command with the right account number, then run this script again." >&2; exit 1
-fi
+# Verify with the bot's own derivation (src/wallet.ts assertSignerKeyMatchesAddress). The bot only runs that
+# check in live mode, so a dry-run tick proves nothing here; this does the same derivation in dry_run.
+# The env file is read inside node only; nothing but match/mismatch is printed.
+res=$(node -e "
+const fs=require('fs'); const {getAddressFromPrivateKey, TransactionVersion}=require('@stacks/transactions');
+const env=Object.fromEntries(fs.readFileSync(process.argv[1],'utf8').split('\\n').filter(l=>/^[A-Z_]+=/.test(l)).map(l=>{const i=l.indexOf('=');return [l.slice(0,i),l.slice(i+1).trim()]}));
+const v=(env.STACKS_NETWORK_VERSION||'mainnet').toLowerCase()==='mainnet'?TransactionVersion.Mainnet:TransactionVersion.Testnet;
+let d; try { d=getAddressFromPrivateKey(env.SIGNER_KEY, v); } catch(e) { console.log('invalid'); process.exit(0); }
+console.log(d===env.SIGNER_ADDRESS?'match':'mismatch');
+" "$f")
+case "$res" in
+  match) ;;
+  invalid) echo "The pasted value is not a valid private key (expect 64 or 66 hex characters, no 0x, no quotes). Run this script again." >&2; exit 1;;
+  *) echo "The key you pasted belongs to a different account than this pool's address. Re-run the key command with the right account number, then run this script again." >&2; exit 1;;
+esac
 echo "ok: key for the $1 pool matches its SIGNER_ADDRESS"
