@@ -26,7 +26,7 @@ Sees or derives a key, goes live without the go, changes the bot's strategy, run
 - `scripts/`: the deterministic steps (install, config writes, checks).
 - `references/campaign-rules.md`: the campaign page's rules and FAQ, quoted verbatim.
 - `evals/evals.json`: test prompts and pass/fail checks.
-- `AGENTS.md` and `CLAUDE.md`: install paths for Codex and Claude Code, and the boundary; both products read the open Agent Skills format, so the folder is shared as is.
+- `AGENTS.md` and `CLAUDE.md`: install paths for Codex and Claude Code, and the boundary; both tools read the open Agent Skills format, so the folder is shared as is.
 
 Track names and rules come from the campaign page; bot mechanics come from the repo README.
 

@@ -12,14 +12,14 @@ The agent never sees, prints or derives a private key or seed phrase, never sets
 
 ## Install
 
-One copy of this folder, placed where each product looks:
+One copy of this folder, placed where each agent tool looks:
 
-| Product | Project scope | User scope | Invoke |
+| Agent tool | Project scope | User scope | Invoke |
 |---|---|---|---|
 | Claude Code | `.claude/skills/stack-sats-market-maker-skill/` | `~/.claude/skills/stack-sats-market-maker-skill/` | `/stack-sats-market-maker-skill` |
 | Codex | `.agents/skills/stack-sats-market-maker-skill/` | `~/.agents/skills/stack-sats-market-maker-skill/` | `$stack-sats-market-maker-skill` |
 
-Both products also trigger the skill on their own from the `description` in `SKILL.md`. Codex follows symlinks, so one folder can serve both:
+Both tools also trigger the skill on their own from the `description` in `SKILL.md`. Codex follows symlinks, so one folder can serve both:
 
 ```bash
 mkdir -p ~/.agents/skills && ln -s ~/.claude/skills/stack-sats-market-maker-skill ~/.agents/skills/stack-sats-market-maker-skill
