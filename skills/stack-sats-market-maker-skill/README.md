@@ -51,7 +51,7 @@ The README is written for a person. An agent reading it alone hands you the firs
 ### Who it is for:
 
 #### **1) Beginners:** 
-Someone who has never run a bot and does not want to learn the terminal to do it. The agent does the typing; you do the five things only you can do: create the account, fund it, derive the key offline, sign the enrollment, and say go.
+Someone who has never run a bot and does not want to learn the terminal to do it. The agent does the typing; you do the few things only you can do: choose how the bot gets its account (it can create one for you, or you can use your own wallet), fund it, hand over the key if you chose your own wallet, accept the campaign terms, and say go.
 
 #### **2) Experienced:** 
 Someone who already runs bots and wants the setup repeatable across both pools and either wallet (Xverse or Leather) without re-reading the README each time.
@@ -73,4 +73,4 @@ One or both campaign pools (sBTC/USDCx and STX/USDCx), one wallet account per po
 
 ### What the agent never does
 
-See or derive a key, go live without your go, change the bot's strategy or numbers, run a manual swap unasked, create a wallet, or drive your wallet or browser.
+See or derive a key, go live without your go, change the bot's strategy or numbers, run a manual swap unasked, create an account except through the Step 3 command you chose, or drive your wallet or browser.
