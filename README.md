@@ -49,6 +49,12 @@ What you need before `npm install`. Facts only; how much to fund is your decisio
    SEED="<your-seed-phrase-here>" node -e "require('@stacks/wallet-sdk').generateWallet({secretKey: process.env.SEED, password: ''}).then(w => console.log(w.accounts[0].stxPrivateKey))"
    ```
 
+   That prints the key of the first account under the seed only. The bot runs one process per pool and each process needs its own account (see "One process per pool" above), so running both pools from one wallet means a second account, and that account has a different key. For a second account, or for any account that is not the first in your wallet, set `N` to the account's number as your wallet lists it (for example "Account 2") and run this form instead:
+
+   ```bash
+   SEED="<your-seed-phrase-here>" N=2 node -e "const s=require('@stacks/wallet-sdk'); s.generateWallet({secretKey: process.env.SEED, password: ''}).then(w => { const i=Number(process.env.N)-1; while (w.accounts.length <= i) w = s.generateNewAccount(w); console.log(w.accounts[i].stxPrivateKey) })"
+   ```
+
    Be sure to clear the shell history after running the commands above. In live mode the bot refuses to start if the key does not derive to `SIGNER_ADDRESS`, so a mistake here fails safe.
 4. **STX for gas** in that account. Each transaction costs between `MIN_TX_FEE_USTX` and `MAX_TX_FEE_USTX` (0.05 to 0.15 STX by default in the pair files), and the bot keeps `STX_GAS_RESERVE_USTX` (5 STX by default) undeployed at all times. For the STX/USDCx pool the same STX balance is also the inventory.
 5. **Both pool tokens** in that account. The bot does not bootstrap a one-sided wallet well: its default target is `F_STAR` (0.38) of deployed value in the base token, and if you start above `F_HARD` (0.67) in base with `ENABLE_SWAP=true` the first live tick may sell base for quote.
