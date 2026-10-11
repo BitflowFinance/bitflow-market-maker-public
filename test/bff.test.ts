@@ -22,6 +22,10 @@ const ok = (body: unknown) => ({
   status: 200,
   statusText: 'OK',
   json: async () => body,
+  text: async () => '',
+  get headers() {
+    return new Headers();
+  },
 });
 
 const route = (overrides: Record<string, unknown> = {}) =>
@@ -38,8 +42,17 @@ const route = (overrides: Record<string, unknown> = {}) =>
     if (url.includes('/quotes/v2/bins/')) return ok(fixtures.v2.bins);
     if (url.includes('/current-bins')) return ok(fixtures.v2.currentBins);
     if (url.includes('/positions/')) return ok(fixtures.v1.positions);
-    // Anything else (app pool, FT balances) is tolerated by the caller.
-    return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) };
+    // Anything else (app pool, FT balances) is tolerated by the caller as a 404.
+    return {
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+      json: async () => ({}),
+      text: async () => '',
+      get headers() {
+        return new Headers();
+      },
+    };
   });
 
 const original = CONFIG.BFF_API_VERSION;

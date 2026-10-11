@@ -220,9 +220,11 @@ export const prepareSwap = async (req: SwapRequest): Promise<PreparedSwap> => {
     .sort((a, b) => a.binId - b.binId);
 
   const estimate = estimateSwapOutput(ladder, activeBin, xForY, req.amountIn, maxSteps);
+  // Floor of 1 micro-unit: a zero/negative min-out would forfeit slippage protection
+  // (and an unbounded SWAP_SLIPPAGE_BPS could drive the float negative, aborting uintCV).
   const slippageMult = 1 - CONFIG.SWAP_SLIPPAGE_BPS / 10000;
   const minReceived =
-    req.minReceived ?? BigInt(Math.floor(Number(estimate.expectedOut) * slippageMult));
+    req.minReceived ?? BigInt(Math.max(1, Math.floor(Number(estimate.expectedOut) * slippageMult)));
 
   const call = buildSwapCall(
     {

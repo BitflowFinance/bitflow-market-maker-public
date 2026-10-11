@@ -148,22 +148,30 @@ export const getRuntimeState = (): RuntimeState => ({
   killSwitch: killSwitchActive(),
 });
 
-const emergencyWithdrawAll = async (poolId: string): Promise<void> => {
-  if (!CONFIG.BREAKER_WITHDRAW_ALL) return;
+const emergencyWithdrawAll = async (
+  poolId: string,
+  currentBinIds?: number[],
+): Promise<void> => {
+  if (!CONFIG.BREAKER_WITHDRAW_ALL) {
+    logInfo(`[${TAG}] breaker withdraw_all skipped (BREAKER_WITHDRAW_ALL=false)`);
+    return;
+  }
   if (CONFIG.EXECUTION_MODE !== 'live') {
     logWarn(`[${TAG}] breaker withdraw_all skipped (mode=${CONFIG.EXECUTION_MODE})`);
     return;
   }
-  if (lastKnownOwnedBinIds.length === 0) {
+  const targetBinIds =
+    currentBinIds && currentBinIds.length > 0 ? currentBinIds : lastKnownOwnedBinIds;
+  if (targetBinIds.length === 0) {
     logWarn(`[${TAG}] breaker withdraw_all: no known owned bins to withdraw`);
     return;
   }
   try {
     const pf = await preflight();
     const ctx = { address: pf.address, nonce: pf.nonce, fee: pf.fee };
-    const res = await withdrawLiquidity(poolId, lastKnownOwnedBinIds, ctx);
+    const res = await withdrawLiquidity(poolId, targetBinIds, ctx);
     logWarn(
-      `[${TAG}] breaker withdraw_all bins=[${lastKnownOwnedBinIds.join(',')}] ok=${res.ok} status="${res.note}" tx=${res.txId || 'none'}`,
+      `[${TAG}] breaker withdraw_all bins=[${targetBinIds.join(',')}] ok=${res.ok} status="${res.note}" tx=${res.txId || 'none'}`,
     );
   } catch (err) {
     logWarn(`[${TAG}] breaker withdraw_all failed error="${(err as Error).message}"`);
@@ -189,7 +197,14 @@ const executeGuardedPlan = async (
   }
   try {
     const pf = await preflight();
-    const estTotalFees = pf.fee * BigInt(plan.steps.length);
+    // Size the balance check against the worst-case fee after the full RBF
+    // ladder (fee * multiplier^bumps, capped at MAX_TX_FEE_USTX); checking only
+    // the first fee could let a bump run the wallet dry mid-plan.
+    const bumpCeiling = Math.min(
+      CONFIG.MAX_TX_FEE_USTX,
+      Number(pf.fee) * CONFIG.TX_FEE_BUMP_MULTIPLIER ** CONFIG.TX_MAX_FEE_BUMPS,
+    );
+    const estTotalFees = BigInt(Math.ceil(bumpCeiling)) * BigInt(plan.steps.length);
     if (pf.missingNonces.length > 0) {
       const reason = `nonce gap detected (missing [${pf.missingNonces.join(',')}]); holding until cleared`;
       logWarn(`[${TAG}] GUARDRAIL nonce_gap ${reason} -> hold`);
@@ -285,18 +300,25 @@ export const runTick = async (): Promise<TickResult> => {
 
   lastKnownOwnedBinIds = snapshot.ownedBinIds;
 
-  const { quote, base, walletQuote, walletBase, ownedQuote, ownedBase, gasStx } =
-    resolveSides(snapshot);
-
+  // Orientation is a hard config invariant. If the configured base token is
+  // neither side of the pool, resolveSides falls back to base=tokenY and the
+  // bot would trade the wrong way round, so freeze instead of only warning.
   if (
     CONFIG.BASE_TOKEN_CONTRACT &&
     snapshot.tokenX.contract !== CONFIG.BASE_TOKEN_CONTRACT &&
     snapshot.tokenY.contract !== CONFIG.BASE_TOKEN_CONTRACT
   ) {
-    logWarn(
-      `[${TAG}] GUARDRAIL base_token_mismatch tokenX="${snapshot.tokenX.contract}" tokenY="${snapshot.tokenY.contract}" expected="${CONFIG.BASE_TOKEN_CONTRACT}" -> base/quote mapping may be wrong`,
-    );
+    const reason = `base_token_mismatch tokenX="${snapshot.tokenX.contract}" tokenY="${snapshot.tokenY.contract}" expected="${CONFIG.BASE_TOKEN_CONTRACT}"`;
+    logWarn(`[${TAG}] GUARDRAIL ${reason} -> frozen, no rebalance this tick`);
+    const result = emptyResult(tickId, startMs, 'frozen', reason);
+    result.activeBinId = snapshot.activeBinId;
+    result.activeBinPrice = snapshot.activeBinPrice;
+    logInfo(`[${TAG}] tick_end id=${tickId} decision="frozen" duration="${result.durationSeconds}s"`);
+    return result;
   }
+
+  const { quote, base, walletQuote, walletBase, ownedQuote, ownedBase, gasStx } =
+    resolveSides(snapshot);
 
   const qLabel = CONFIG.QUOTE_ASSET_NAME;
   const bLabel = CONFIG.BASE_ASSET_NAME;
@@ -398,10 +420,13 @@ export const runTick = async (): Promise<TickResult> => {
   if (dec.halt) {
     decision = 'frozen';
     reason = `${dec.halt.kind}: ${dec.halt.reason}`;
+    const actionNote = CONFIG.BREAKER_WITHDRAW_ALL
+      ? ' -> withdraw all + frozen'
+      : ' -> frozen (withdraw_all disabled)';
     logWarn(
-      `[${TAG}] GUARDRAIL strategy_halt kind=${dec.halt.kind} reason="${dec.halt.reason}" -> withdraw all + frozen`,
+      `[${TAG}] GUARDRAIL strategy_halt kind=${dec.halt.kind} reason="${dec.halt.reason}"${actionNote}`,
     );
-    await emergencyWithdrawAll(snapshot.poolId);
+    await emergencyWithdrawAll(snapshot.poolId, snapshot.ownedBinIds);
   } else if (dec.plan) {
     const guarded = await executeGuardedPlan(dec.plan, gasStx);
     decision = guarded.decision;

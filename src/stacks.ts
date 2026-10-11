@@ -12,6 +12,17 @@ import { CONFIG } from './config';
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+// HTTP status tagged error so retry() can distinguish server/network failures
+// (worth retrying) from permanent client errors (retrying a 401/403 is noise).
+export class HttpStatusError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
 const retry = async <T>(fn: () => Promise<T>, attempts: number): Promise<T> => {
   let lastError: Error | null = null;
   for (let i = 0; i <= attempts; i++) {
@@ -19,11 +30,31 @@ const retry = async <T>(fn: () => Promise<T>, attempts: number): Promise<T> => {
       return await fn();
     } catch (err) {
       lastError = err as Error;
+      // 4xx responses are permanent; do not burn retries on them.
+      if (lastError instanceof HttpStatusError && lastError.status < 500 && lastError.status >= 400) {
+        throw lastError;
+      }
       if (i === attempts) break;
       await sleep(1000 * 2 ** i);
     }
   }
   throw lastError ?? new Error('retry failed');
+};
+
+// Per-request fetch timeout so a hung node/BFF cannot stall a tick indefinitely.
+const HTTP_TIMEOUT_MS = 15000;
+
+const fetchWithTimeout = async (
+  url: string,
+  init: RequestInit,
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 export const parseContract = (contract: string): { address: string; name: string } => {
@@ -118,8 +149,8 @@ export const fetchJson = async <T = unknown>(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) headers['X-API-Key'] = apiKey;
   return retry(async () => {
-    const res = await fetch(url, { headers });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText} (${url})`);
+    const res = await fetchWithTimeout(url, { headers });
+    if (!res.ok) throw new HttpStatusError(res.status, `${res.status} ${res.statusText} (${url})`);
     return (await res.json()) as T;
   }, CONFIG.STACKS_CALL_MAX_RETRIES);
 };
@@ -145,9 +176,9 @@ export const fetchJsonAllowMissing = async <T = unknown>(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) headers['X-API-Key'] = apiKey;
   return retry(async () => {
-    const res = await fetch(url, { headers });
+    const res = await fetchWithTimeout(url, { headers });
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText} (${url})`);
+    if (!res.ok) throw new HttpStatusError(res.status, `${res.status} ${res.statusText} (${url})`);
     return (await res.json()) as T;
   }, CONFIG.STACKS_CALL_MAX_RETRIES);
 };
