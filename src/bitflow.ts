@@ -349,9 +349,23 @@ export const getPoolSnapshot = async (
   // breaker see it instead.
   const userBins = address ? await fetchUserBins(poolId, address) : [];
 
+  // HIRO answers 404 when an account has never transacted an asset — that is a
+  // traceable zero, not a failure. Any other balance-read error (RPC down, 5xx)
+  // must surface to the API-error breaker instead of being read as an empty
+  // wallet, which would let the strategy de-risk against fake zero inventory.
+  const balanceOrZero = async (contract: string, addr: string | undefined): Promise<bigint> => {
+    if (!addr) return BigInt(0);
+    try {
+      return await getFtBalance(contract, addr);
+    } catch (err) {
+      if (/404/.test((err as Error).message || '')) return BigInt(0);
+      throw err;
+    }
+  };
+
   const [walletX, walletY] = await Promise.all([
-    getFtBalance(tokenX.contract, address).catch(() => BigInt(0)),
-    getFtBalance(tokenY.contract, address).catch(() => BigInt(0)),
+    balanceOrZero(tokenX.contract, address),
+    balanceOrZero(tokenY.contract, address),
   ]);
 
   // Owned reserves are our share of each bin: the user-positions endpoint only

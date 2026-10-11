@@ -19,6 +19,15 @@ const readArg = (name: string): string | undefined => {
 };
 
 const POOL_PROFILE = readArg('--pool') || process.env.POOL_PROFILE || '';
+
+// Numeric env coercion that rejects non-finite values. Math.max(x, NaN) is NaN,
+// and NaN silently disables every guard it feeds (tip freshness, divergence
+// halt, circuit breaker), so a typo'd var must fail closed to its default.
+const num = (value: string | undefined, fallback: number): number => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
 const resolveEnvFile = (): string => {
   const explicit = readArg('--env') || process.env.ENV_FILE;
   if (explicit) {
@@ -166,7 +175,7 @@ export interface AppConfig {
 export const CONFIG: AppConfig = {
   ENVIRONMENT_TYPE: process.env.ENVIRONMENT_TYPE || 'dev',
   EXECUTION_MODE: process.env.EXECUTION_MODE === 'live' ? 'live' : 'dry_run',
-  TICK_INTERVAL_MS: Math.max(1000, Number(process.env.TICK_INTERVAL_MS || 30000)),
+  TICK_INTERVAL_MS: Math.max(1000, num(process.env.TICK_INTERVAL_MS, 30000)),
 
   POOL_PROFILE,
   ENV_FILE,
@@ -178,7 +187,7 @@ export const CONFIG: AppConfig = {
   BFF_API_BASE_URL: process.env.BFF_API_BASE_URL || 'https://bff.bitflowapis.finance/api',
   BFF_API_KEY: process.env.BFF_API_KEY || '',
   BFF_API_VERSION: process.env.BFF_API_VERSION === 'v1' ? 'v1' : 'v2',
-  BFF_MAX_TIP_LAG: Math.max(0, Number(process.env.BFF_MAX_TIP_LAG || 0)),
+  BFF_MAX_TIP_LAG: Math.max(0, num(process.env.BFF_MAX_TIP_LAG, 0)),
 
   STACKS_NODE_URL: process.env.STACKS_NODE_URL || '',
   STACKS_NODE_KEY: process.env.STACKS_NODE_KEY || '',
@@ -198,74 +207,74 @@ export const CONFIG: AppConfig = {
   SWAP_ROUTER_CONTRACT:
     process.env.SWAP_ROUTER_CONTRACT ||
     'SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-swap-router-v-1-2',
-  SWAP_MAX_STEPS: Math.min(319, Math.max(1, Number(process.env.SWAP_MAX_STEPS || 50))),
-  SWAP_SLIPPAGE_BPS: Math.max(0, Number(process.env.SWAP_SLIPPAGE_BPS || 100)),
+  SWAP_MAX_STEPS: Math.min(319, Math.max(1, num(process.env.SWAP_MAX_STEPS, 50))),
+  SWAP_SLIPPAGE_BPS: Math.max(0, num(process.env.SWAP_SLIPPAGE_BPS, 100)),
   SWAP_POST_CONDITION_MODE: process.env.SWAP_POST_CONDITION_MODE === 'allow' ? 'allow' : 'deny',
-  MAX_SWAP_INPUT_USTX: Math.max(0, Number(process.env.MAX_SWAP_INPUT_USTX || 0)),
+  MAX_SWAP_INPUT_USTX: Math.max(0, num(process.env.MAX_SWAP_INPUT_USTX, 0)),
 
   LIQUIDITY_ROUTER_CONTRACT:
     process.env.LIQUIDITY_ROUTER_CONTRACT ||
     'SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-liquidity-router-v-1-2',
   POOL_LP_ASSET_NAME: process.env.POOL_LP_ASSET_NAME || 'pool-token',
   POOL_NFT_ASSET_NAME: process.env.POOL_NFT_ASSET_NAME || 'pool-token-id',
-  NFT_PC_BIN_ID_BUFFER: Math.max(0, Number(process.env.NFT_PC_BIN_ID_BUFFER || 0)),
-  LIQUIDITY_SLIPPAGE_BPS: Math.max(0, Number(process.env.LIQUIDITY_SLIPPAGE_BPS || 100)),
-  ACTIVE_BIN_MAX_DEVIATION: Math.max(0, Number(process.env.ACTIVE_BIN_MAX_DEVIATION || 1)),
-  TX_DEADLINE_SECONDS: Math.max(1, Number(process.env.TX_DEADLINE_SECONDS || 120)),
+  NFT_PC_BIN_ID_BUFFER: Math.max(0, num(process.env.NFT_PC_BIN_ID_BUFFER, 0)),
+  LIQUIDITY_SLIPPAGE_BPS: Math.max(0, num(process.env.LIQUIDITY_SLIPPAGE_BPS, 100)),
+  ACTIVE_BIN_MAX_DEVIATION: Math.max(0, num(process.env.ACTIVE_BIN_MAX_DEVIATION, 1)),
+  TX_DEADLINE_SECONDS: Math.max(1, num(process.env.TX_DEADLINE_SECONDS, 120)),
   LIQUIDITY_POST_CONDITION_MODE:
     process.env.LIQUIDITY_POST_CONDITION_MODE === 'allow' ? 'allow' : 'deny',
 
-  CURVE_HALF_WIDTH_BINS: Math.max(1, Number(process.env.CURVE_HALF_WIDTH_BINS || 5)),
-  CURVE_DECAY: Math.min(1, Math.max(0.01, Number(process.env.CURVE_DECAY || 0.6))),
-  CURVE_SIZE_FRACTION: Math.min(1, Math.max(0.01, Number(process.env.CURVE_SIZE_FRACTION || 0.6))),
-  CURVE_REPOSITION_DRIFT_BINS: Math.max(1, Number(process.env.CURVE_REPOSITION_DRIFT_BINS || 3)),
+  CURVE_HALF_WIDTH_BINS: Math.max(1, num(process.env.CURVE_HALF_WIDTH_BINS, 5)),
+  CURVE_DECAY: Math.min(1, Math.max(0.01, num(process.env.CURVE_DECAY, 0.6))),
+  CURVE_SIZE_FRACTION: Math.min(1, Math.max(0.01, num(process.env.CURVE_SIZE_FRACTION, 0.6))),
+  CURVE_REPOSITION_DRIFT_BINS: Math.max(1, num(process.env.CURVE_REPOSITION_DRIFT_BINS, 3)),
   CURVE_MAX_REPOSITION_DRIFT_BINS: Math.max(
-    Math.max(1, Number(process.env.CURVE_REPOSITION_DRIFT_BINS || 3)),
-    Number(process.env.CURVE_MAX_REPOSITION_DRIFT_BINS || 0),
+    Math.max(1, num(process.env.CURVE_REPOSITION_DRIFT_BINS, 3)),
+    num(process.env.CURVE_MAX_REPOSITION_DRIFT_BINS, 0),
   ),
-  SIGMA_REF: Math.max(0, Number(process.env.SIGMA_REF || 0.001)),
-  CURVE_MAX_HALF_WIDTH_BINS: Math.max(1, Number(process.env.CURVE_MAX_HALF_WIDTH_BINS || 15)),
+  SIGMA_REF: Math.max(0, num(process.env.SIGMA_REF, 0.001)),
+  CURVE_MAX_HALF_WIDTH_BINS: Math.max(1, num(process.env.CURVE_MAX_HALF_WIDTH_BINS, 15)),
   CURVE_MIN_SIZE_FRACTION: Math.min(
     1,
-    Math.max(0.01, Number(process.env.CURVE_MIN_SIZE_FRACTION || 0.2)),
+    Math.max(0.01, num(process.env.CURVE_MIN_SIZE_FRACTION, 0.2)),
   ),
-  CURVE_BID_LEAN_MAX: Math.max(1, Number(process.env.CURVE_BID_LEAN_MAX || 1.5)),
-  DIVERGENCE_WARN_BPS: Math.max(0, Number(process.env.DIVERGENCE_WARN_BPS || 80)),
-  DIVERGENCE_HALT_BPS: Math.max(0, Number(process.env.DIVERGENCE_HALT_BPS || 150)),
-  REFERENCE_FEED_HALT_MS: Math.max(1000, Number(process.env.REFERENCE_FEED_HALT_MS || 300000)),
-  F_STAR: Math.min(1, Math.max(0, Number(process.env.F_STAR || 0.38))),
-  F_SOFT: Math.min(1, Math.max(0, Number(process.env.F_SOFT || 0.44))),
-  F_HARD: Math.min(1, Math.max(0, Number(process.env.F_HARD || 0.5))),
-  DERISK_MAX_FRACTION: Math.min(1, Math.max(0, Number(process.env.DERISK_MAX_FRACTION || 0.4))),
+  CURVE_BID_LEAN_MAX: Math.max(1, num(process.env.CURVE_BID_LEAN_MAX, 1.5)),
+  DIVERGENCE_WARN_BPS: Math.max(0, num(process.env.DIVERGENCE_WARN_BPS, 80)),
+  DIVERGENCE_HALT_BPS: Math.max(0, num(process.env.DIVERGENCE_HALT_BPS, 150)),
+  REFERENCE_FEED_HALT_MS: Math.max(1000, num(process.env.REFERENCE_FEED_HALT_MS, 300000)),
+  F_STAR: Math.min(1, Math.max(0, num(process.env.F_STAR, 0.38))),
+  F_SOFT: Math.min(1, Math.max(0, num(process.env.F_SOFT, 0.44))),
+  F_HARD: Math.min(1, Math.max(0, num(process.env.F_HARD, 0.5))),
+  DERISK_MAX_FRACTION: Math.min(1, Math.max(0, num(process.env.DERISK_MAX_FRACTION, 0.4))),
 
   KILL_SWITCH: process.env.KILL_SWITCH === 'true',
   KILL_SWITCH_FILE: process.env.KILL_SWITCH_FILE || '',
-  MAX_POSITION_USTX: Math.max(0, Number(process.env.MAX_POSITION_USTX || 0)),
+  MAX_POSITION_USTX: Math.max(0, num(process.env.MAX_POSITION_USTX, 0)),
 
-  MAX_CONSECUTIVE_API_ERRORS: Math.max(0, Number(process.env.MAX_CONSECUTIVE_API_ERRORS || 5)),
+  MAX_CONSECUTIVE_API_ERRORS: Math.max(0, num(process.env.MAX_CONSECUTIVE_API_ERRORS, 5)),
   BREAKER_WITHDRAW_ALL: process.env.BREAKER_WITHDRAW_ALL === 'true',
 
   ENABLE_SWAP: process.env.ENABLE_SWAP !== 'false',
   ENABLE_ADD_LIQUIDITY: process.env.ENABLE_ADD_LIQUIDITY !== 'false',
   ENABLE_WITHDRAW_LIQUIDITY: process.env.ENABLE_WITHDRAW_LIQUIDITY !== 'false',
 
-  MIN_TX_FEE_USTX: Math.max(1, Number(process.env.MIN_TX_FEE_USTX || 10000)),
-  MAX_TX_FEE_USTX: Math.max(1, Number(process.env.MAX_TX_FEE_USTX || 3000000)),
-  DEFAULT_TX_FEE_USTX: Math.max(1, Number(process.env.DEFAULT_TX_FEE_USTX || 60000)),
+  MIN_TX_FEE_USTX: Math.max(1, num(process.env.MIN_TX_FEE_USTX, 10000)),
+  MAX_TX_FEE_USTX: Math.max(1, num(process.env.MAX_TX_FEE_USTX, 3000000)),
+  DEFAULT_TX_FEE_USTX: Math.max(1, num(process.env.DEFAULT_TX_FEE_USTX, 60000)),
   FEE_MEMPOOL_PERCENTILE: ['p25', 'p50', 'p75', 'p95'].includes(
     process.env.FEE_MEMPOOL_PERCENTILE || '',
   )
     ? String(process.env.FEE_MEMPOOL_PERCENTILE)
     : 'p50',
-  FEE_OUTLIER_MULTIPLE: Math.max(0, Number(process.env.FEE_OUTLIER_MULTIPLE || 4)),
-  STX_GAS_RESERVE_USTX: Math.max(0, Number(process.env.STX_GAS_RESERVE_USTX || 5000000)),
-  TX_CONFIRMATION_TIMEOUT_MS: Math.max(1000, Number(process.env.TX_CONFIRMATION_TIMEOUT_MS || 120000)),
-  TX_POLL_INTERVAL_MS: Math.max(1000, Number(process.env.TX_POLL_INTERVAL_MS || 5000)),
-  TX_FEE_BUMP_MULTIPLIER: Math.max(1.1, Number(process.env.TX_FEE_BUMP_MULTIPLIER || 1.5)),
-  TX_MAX_FEE_BUMPS: Math.max(0, Number(process.env.TX_MAX_FEE_BUMPS || 3)),
+  FEE_OUTLIER_MULTIPLE: Math.max(0, num(process.env.FEE_OUTLIER_MULTIPLE, 4)),
+  STX_GAS_RESERVE_USTX: Math.max(0, num(process.env.STX_GAS_RESERVE_USTX, 5000000)),
+  TX_CONFIRMATION_TIMEOUT_MS: Math.max(1000, num(process.env.TX_CONFIRMATION_TIMEOUT_MS, 120000)),
+  TX_POLL_INTERVAL_MS: Math.max(1000, num(process.env.TX_POLL_INTERVAL_MS, 5000)),
+  TX_FEE_BUMP_MULTIPLIER: Math.max(1.1, num(process.env.TX_FEE_BUMP_MULTIPLIER, 1.5)),
+  TX_MAX_FEE_BUMPS: Math.max(0, num(process.env.TX_MAX_FEE_BUMPS, 3)),
 
-  STACKS_CALL_TIMEOUT_MS: Number(process.env.STACKS_CALL_TIMEOUT_MS || 30000),
-  STACKS_CALL_MAX_RETRIES: Number(process.env.STACKS_CALL_MAX_RETRIES || 3),
+  STACKS_CALL_TIMEOUT_MS: num(process.env.STACKS_CALL_TIMEOUT_MS, 30000),
+  STACKS_CALL_MAX_RETRIES: num(process.env.STACKS_CALL_MAX_RETRIES, 3),
 
   COINGECKO_API_KEY: process.env.COINGECKO_API_KEY || '',
   COINGECKO_BASE_URL:
@@ -278,18 +287,18 @@ export const CONFIG: AppConfig = {
   COINGECKO_PEG_ID: process.env.COINGECKO_PEG_ID || '',
   REFERENCE_FEED_REFRESH_MS: Math.max(
     1000,
-    Number(process.env.REFERENCE_FEED_REFRESH_MS || (process.env.COINGECKO_API_KEY ? 30000 : 60000)),
+    num(process.env.REFERENCE_FEED_REFRESH_MS, process.env.COINGECKO_API_KEY ? 30000 : 60000),
   ),
-  REFERENCE_FEED_TIMEOUT_MS: Math.max(1000, Number(process.env.REFERENCE_FEED_TIMEOUT_MS || 10000)),
-  REFERENCE_FEED_MAX_AGE_MS: Math.max(1000, Number(process.env.REFERENCE_FEED_MAX_AGE_MS || 90000)),
-  REFERENCE_VOL_SAMPLES: Math.max(2, Number(process.env.REFERENCE_VOL_SAMPLES || 20)),
-  PEG_BREAK_BPS: Math.max(0, Number(process.env.PEG_BREAK_BPS || 100)),
+  REFERENCE_FEED_TIMEOUT_MS: Math.max(1000, num(process.env.REFERENCE_FEED_TIMEOUT_MS, 10000)),
+  REFERENCE_FEED_MAX_AGE_MS: Math.max(1000, num(process.env.REFERENCE_FEED_MAX_AGE_MS, 90000)),
+  REFERENCE_VOL_SAMPLES: Math.max(2, num(process.env.REFERENCE_VOL_SAMPLES, 20)),
+  PEG_BREAK_BPS: Math.max(0, num(process.env.PEG_BREAK_BPS, 100)),
 
   METRICS_ENABLED: process.env.METRICS_ENABLED !== 'false',
   METRICS_HTTP_ENABLED: process.env.METRICS_HTTP_ENABLED !== 'false',
   METRICS_HTTP_HOST: process.env.METRICS_HTTP_HOST || '127.0.0.1',
-  METRICS_HTTP_PORT: Math.max(0, Number(process.env.METRICS_HTTP_PORT || 8080)),
-  METRICS_HISTORY_SIZE: Math.max(1, Number(process.env.METRICS_HISTORY_SIZE || 200)),
+  METRICS_HTTP_PORT: Math.max(0, num(process.env.METRICS_HTTP_PORT, 8080)),
+  METRICS_HISTORY_SIZE: Math.max(1, num(process.env.METRICS_HISTORY_SIZE, 200)),
   METRICS_LOG_FILE:
     process.env.METRICS_LOG_FILE ||
     (POOL_PROFILE ? `data/metrics.${POOL_PROFILE}.jsonl` : 'data/metrics.jsonl'),
