@@ -71,8 +71,8 @@ export function HomePage({ fleet, now, reload }: Shared) {
           ) : (
             <h2 className="sec-h">Simulations</h2>
           )}
-          {real.length && showSims ? null : <span className="muted">Simulated funds, to see how a bot behaves.</span>}
         </div>
+        {!real.length || showSims ? <p className="muted sec-sub">Simulated funds, to see how a bot behaves.</p> : null}
         {!real.length || showSims ? (
           <div className="cards">
             {previews.map((bot) => (

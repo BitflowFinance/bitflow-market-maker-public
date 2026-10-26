@@ -181,6 +181,7 @@ html, body { margin: 0; }
 .nx .sec { display: grid; gap: 12px; }
 .nx .sec-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .nx .sec-h { font-size: 15px; font-weight: 650; }
+.nx .sec-sub { margin-top: -6px; }
 
 /* empty + banners */
 .nx .empty2 { display: flex; gap: 14px; align-items: flex-start; padding: 18px; border: 1px dashed var(--line); border-radius: 10px; color: var(--ink-2); }
