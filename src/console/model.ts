@@ -471,6 +471,9 @@ export const stateOf = (record: BotRecord, nowMs: number): BotState => {
     };
   }
   const tick = record.lastTick;
+  if (tick && tick.reason === 'kill_switch') {
+    return { tone: 'info', label: 'Resuming', detail: 'Resumed. Trading again from the next check.' };
+  }
   if (!tick) return { tone: 'unknown', label: 'Starting', detail: 'Waiting for the first check.' };
   const stale = staleMs(record, nowMs);
   if (stale != null) return { tone: 'warn', label: 'Quiet', detail: `No check for ${minutes(stale)}.` };

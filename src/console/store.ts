@@ -820,7 +820,8 @@ export class ConsoleStore {
       baseSymbol: profile.baseSymbol,
       quoteSymbol: profile.quoteSymbol,
       running,
-      paused: this.isPaused(env) || Boolean(lastTick && lastTick.reason === 'kill_switch'),
+      // The kill switch itself, not the last check: after Resume that check still says paused for up to an interval.
+      paused: this.isPaused(env),
       mode: env.EXECUTION_MODE === 'live' ? 'live' : 'dry_run',
       keySet: Boolean(env.SIGNER_KEY),
       address,

@@ -3,8 +3,8 @@ import { BotView, api } from './api';
 import { Card, useToast } from './ui';
 
 const KEYS: Array<{ name: string; label: string; help: string }> = [
-  { name: 'STACKS_NODE_KEY', label: 'Hiro API key', help: 'Balances, nonces and transactions. The free tier is usually enough for one or two bots.' },
-  { name: 'BFF_API_KEY', label: 'Bitflow API key', help: 'Pool and position reads. Only needed if Bitflow gave you one for a higher limit.' },
+  { name: 'STACKS_NODE_KEY', label: 'Hiro API key', help: 'Balances, nonces and transactions.' },
+  { name: 'BFF_API_KEY', label: 'Bitflow API key', help: 'Pool and position reads.' },
   { name: 'COINGECKO_API_KEY', label: 'CoinGecko API key', help: 'The market price the bot compares the pool against.' },
 ];
 
@@ -34,7 +34,7 @@ export function KeysCard({ bot, reload }: { bot: BotView; reload: () => Promise<
 
   return (
     <Card title="API keys" aside={<span className="muted">Optional</span>}>
-      <p className="muted">The bot works without these. Add one if a provider starts rate-limiting it. Saving restarts a running bot.</p>
+      <p className="muted">The bot works without these. Add one if a provider starts rate-limiting it.</p>
       <div className="keys">
         {KEYS.map((key) => {
           const set = Boolean(bot.keysSet?.[key.name]);

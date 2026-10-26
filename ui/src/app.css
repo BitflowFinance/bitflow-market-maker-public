@@ -41,18 +41,19 @@ html, body { margin: 0; }
 .nx .conn.bad, .nx .conn.t-serious { color: var(--serious-ink); background: var(--serious-bg); border-color: transparent; }
 .nx .conn.t-warn { color: var(--warn-ink); background: var(--warn-bg); border-color: var(--warn-line); }
 .nx .conn { position: relative; cursor: default; }
-.nx .conn .tip { display: none; position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; width: max-content; max-width: 340px; padding: 10px 12px; border-radius: 10px; background: var(--pop); border: 1px solid var(--line); box-shadow: var(--shadow); color: var(--ink); font-size: 12.5px; flex-direction: column; gap: 8px; }
+.nx .conn .tip { display: none; position: absolute; top: calc(100% + 10px); right: 0; z-index: 40; width: max-content; min-width: 280px; max-width: 380px; padding: 14px 16px; border-radius: 12px; background: var(--pop); border: 1px solid var(--line); box-shadow: var(--shadow); color: var(--ink); font-size: 13px; flex-direction: column; gap: 12px; }
 .nx .conn:hover .tip, .nx .conn:focus-visible .tip { display: flex; }
 .nx .tip-h { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 650; }
-.nx .tip-row { display: flex; gap: 8px; align-items: flex-start; line-height: 1.45; }
-.nx .tip-row .dot2 { margin-top: 5px; }
+.nx .tip-row { display: flex; gap: 10px; align-items: flex-start; line-height: 1.5; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.nx .tip-h + .tip-row { padding-top: 0; border-top: 0; }
+.nx .tip-row .dot2 { margin-top: 6px; }
 .nx .tip-sub { display: block; color: var(--muted); }
 .nx .keys { display: grid; }
 .nx .keyrow { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 12px 0; border-top: 1px solid var(--line-soft); }
 .nx .keyrow:first-child { border-top: 0; padding-top: 0; }
 .nx .keyrow-l { display: grid; gap: 2px; min-width: 0; flex: 1 1 260px; }
 .nx .keyrow-f { display: flex; align-items: center; gap: 8px; }
-.nx .keyrow-f .in { width: 240px; }
+.nx .keyrow-f .in { width: 240px; height: 32px; padding: 0 10px; }
 .nx .ibtn { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--ink-2); cursor: pointer; }
 .nx .ibtn:hover { background: var(--hover); color: var(--ink); }
 .nx .topbar .ibtn:hover { background: var(--sel); }
@@ -177,6 +178,8 @@ html, body { margin: 0; }
 .nx .banner2 .ico { margin-top: 3px; }
 .nx .banner2 .grow { flex: 1; min-width: 0; }
 .nx .banner2 .btn { margin: -4px 0; flex: none; }
+.nx .banner2 .btn .ico { margin-top: 0; }
+.nx .banner2 > .ico { flex: none; }
 .nx .banner2.info { background: var(--info-bg); border-color: var(--info-line); }
 .nx .banner2.info .ico { color: var(--accent); }
 .nx .banner2.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-ink); }
@@ -460,8 +463,9 @@ html, body { margin: 0; }
 .nx .addrbox-k { grid-column: 1 / -1; font-size: 12px; color: var(--muted); font-weight: 550; }
 .nx .addrbox-v { font-size: 13px; word-break: break-all; }
 .nx .keybtns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.nx .fundaddr { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
-.nx .fundaddr .addrbox { flex: 1; min-width: 220px; }
+/* Code on top, address below it at full width, both aligned left. */
+.nx .fundaddr { display: grid; gap: 12px; justify-items: start; }
+.nx .fundaddr .addrbox { width: 100%; }
 .nx .qr { border-radius: 8px; flex: none; border: 1px solid var(--line); }
 
 /* pools */

@@ -210,6 +210,7 @@ const statusText = (bot: BotView): string => {
   if (!bot.running) return bot.startError || 'The bot is off. Liquidity stays in the pool, unmanaged.';
   if (bot.paused) return 'Watching, not trading. Liquidity stays in the pool.';
   if (!bot.lastCheckAt) return 'Waiting for the first check.';
+  if (bot.reasonRaw === 'kill_switch') return bot.state.detail;
   return bot.reason?.text || bot.state.detail;
 };
 
@@ -1279,7 +1280,7 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
           lead={
             <>
               {open === 'withdraw' ? 'Moves liquidity back to the wallet. It stays there until you resume.' : 'Sends one transaction from the bot wallet now.'}{' '}
-              It waits for the transaction to confirm, which can take a few minutes.
+              It waits for the transaction to confirm, usually a few seconds.
             </>
           }
           facts={[
