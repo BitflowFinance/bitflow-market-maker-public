@@ -497,7 +497,7 @@ html, body { margin: 0; }
 .nx .pickpool { display: grid; gap: 10px; padding-top: 8px; border-top: 1px solid var(--line-soft); }
 /* A second heading inside a card, matching the card's own title. */
 .nx .sub-h { font-size: 14.5px; font-weight: 650; margin-top: 6px; }
-.nx .pl-row.off.on { border-style: solid; }
+.nx .pl-row.off.on { border-style: solid; border-color: var(--warn); background: var(--warn-bg); color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 20%, transparent); }
 .nx .pl { display: grid; gap: 8px; }
 .nx .pl-row { font: inherit; text-align: left; color: var(--ink); display: grid; gap: 6px; padding: 12px 14px; border-radius: 10px; border: 1.5px solid var(--line); background: var(--page); cursor: pointer; }
 .nx button.pl-row:hover { border-color: var(--accent); }
