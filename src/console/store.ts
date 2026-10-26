@@ -482,8 +482,11 @@ export class ConsoleStore {
       );
     }
     const args = manualArgs(profile, body);
-    const output = await this.host.runManual(profile.id, args);
-    return { ok: true, output };
+    // A real add or withdraw waits for its transaction to confirm and may bump the fee.
+    const output = await this.host.runManual(profile.id, args, { timeoutMs: MANUAL_TIMEOUT_MS });
+    const outcome = manualOutcome(output);
+    if (!outcome.ok) throw new HttpError(502, 'manual_failed', outcome.message);
+    return { ok: true, output: outcome.message };
   }
 
   /** The raw key, for the page's backup step only. The server gates this route to the page. */
@@ -955,6 +958,29 @@ export const decisionsCsvOf = (ticks: TickLike[]): string => {
     ];
   });
   return `${[header, ...rows].map((cells) => cells.map(csvCell).join(',')).join('\n')}\n`;
+};
+
+const MANUAL_TIMEOUT_MS = 10 * 60_000;
+
+// The bot's runners log a failure and exit 0, so success has to be read from the
+// output. Known failures get a plain sentence; anything else shows the bot's words.
+const MANUAL_FAILURES: Array<[RegExp, string]> = [
+  [/no withdrawable positions/, 'There is nothing in the pool to withdraw.'],
+  [/cannot cover tx fee/, 'The wallet does not have enough STX to pay the network fee.'],
+  [/requires EXECUTION_MODE=live/, 'The bot is in dry run, so it will not send transactions.'],
+  [/NODE_POSITION_NOT_REGISTERED|snapshot unusable|snapshot stale/, 'Bitflow could not confirm the position right now. Try again in a minute.'],
+];
+
+export const manualOutcome = (raw: string): { ok: boolean; message: string } => {
+  const lines = raw.split('\n').map(parseLogLine).filter((line) => line.text);
+  const failed = lines.find((line) => line.level === 'error' || line.level === 'fatal' || /ok=false|aborting/.test(line.text));
+  if (failed) {
+    const known = MANUAL_FAILURES.find(([pattern]) => pattern.test(failed.text));
+    return { ok: false, message: known ? known[1] : failed.text.replace(/^\[\w+\]\s*/, '') };
+  }
+  const sent = [...lines].reverse().find((line) => /tx=0x[0-9a-f]+/i.test(line.text));
+  if (sent) return { ok: true, message: sent.text.replace(/^\[\w+\]\s*/, '') };
+  return lines.length ? { ok: true, message: lines[lines.length - 1].text } : { ok: false, message: 'The action did not report a result.' };
 };
 
 export const KEY_TAIL_CHARS = 4;

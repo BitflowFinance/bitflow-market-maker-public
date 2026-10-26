@@ -1180,7 +1180,7 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
     try {
       const res = await api<{ ok: true; output: string }>(`/api/bots/${encodeURIComponent(bot.id)}/manual`, 'POST', body);
       setOutput(res.output || '(no output)');
-      toast('good', 'Done.');
+      toast('good', 'Sent and confirmed.');
       setOpen('');
       await reload();
     } catch (err) {
@@ -1191,6 +1191,16 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
   };
 
   const wallet = `${tok(bot.walletBase, bot.baseSymbol)} · ${tok(bot.walletQuote, bot.quoteSymbol)}`;
+  // Balances from the last check; null means unknown, which leaves the action open.
+  const nothingInPool = bot.ownedBase === 0 && bot.ownedQuote === 0;
+  const walletEmpty = bot.walletBase === 0 && bot.walletQuote === 0;
+  const blockedFor = (kind: ManualKind): string => {
+    if (shared) return shared;
+    if (busy) return 'Another action is still running.';
+    if (kind === 'withdraw' && nothingInPool) return 'Nothing in the pool to withdraw.';
+    if (kind !== 'withdraw' && walletEmpty) return 'The wallet is empty.';
+    return '';
+  };
   const items: Array<{ kind: ManualKind; title: string; body: string; detail: string; icon: 'arrow' | 'plus' | 'wallet' }> = [
     { kind: 'swap', title: 'Swap', body: `Trade ${bot.baseSymbol} for ${bot.quoteSymbol}, or back, in this pool.`, detail: `Wallet: ${wallet}`, icon: 'arrow' },
     { kind: 'add', title: 'Add liquidity', body: 'Move tokens from the wallet into the pool.', detail: `Wallet: ${wallet}`, icon: 'plus' },
@@ -1226,7 +1236,7 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
       )}
       <div className="cards three">
         {items.map((item) => {
-          const why = shared;
+          const why = blockedFor(item.kind);
           return (
             <button
               key={item.kind}
@@ -1245,7 +1255,7 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
               <span>
                 <b>{item.title}</b>
                 <small>{item.body}</small>
-                <small className="mcard-d">{item.detail}</small>
+                <small className="mcard-d">{why && why !== shared ? why : item.detail}</small>
               </span>
             </button>
           );
@@ -1260,9 +1270,10 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
         <RiskConfirm
           title={open === 'swap' ? 'Swap now' : open === 'add' ? 'Add liquidity now' : 'Withdraw now'}
           lead={
-            open === 'withdraw'
-              ? 'Moves liquidity back to the wallet. It stays there until you resume.'
-              : 'Sends one transaction from the bot wallet now.'
+            <>
+              {open === 'withdraw' ? 'Moves liquidity back to the wallet. It stays there until you resume.' : 'Sends one transaction from the bot wallet now.'}{' '}
+              It waits for the transaction to confirm, which can take a few minutes.
+            </>
           }
           facts={[
             ['Pool', `${bot.pair} (${poolName(bot.poolId)})`],

@@ -6,7 +6,7 @@ import { checkBridgeInput, xOnlyKey } from '../src/console/bridgeLive';
 import { bookOf, humanReason, parseLogLine, validateSettings } from '../src/console/model';
 import { decimalToMicro } from '../src/console/money';
 import { handleConsole, RequestHeaders } from '../src/console/server';
-import { BridgeClient, BridgeInput, BridgeJob, ConsoleHost, ConsoleStore, HttpError } from '../src/console/store';
+import { BridgeClient, BridgeInput, BridgeJob, ConsoleHost, ConsoleStore, HttpError, manualOutcome } from '../src/console/store';
 import { createWallet } from '../src/console/wallet';
 import { checkMemo, checkPayoutAddress, stxSweepAmount } from '../src/payout';
 
@@ -390,6 +390,15 @@ describe('local console', () => {
     const fresh = boot();
     await fresh.call('POST', '/api/bots', { profile: 'stx', wallet: 'create' });
     expect(readFileSync(join(fresh.root, '.env.stx'), 'utf8')).toMatch(/^POOL_ID=SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD\.dlmm-pool-stx-usdcx-v-1-bps-10$/m);
+  });
+
+  it('reads a manual run’s outcome from its output instead of assuming success', () => {
+    const fail = (text: string) => `[10:00:00.000] INFO: [index] starting\n\u001b[31m[10:00:01.000] ERROR: [index] ${text}\u001b[39m\n`;
+    expect(manualOutcome(fail('withdraw liquidity prepare failed error="no withdrawable positions found"'))).toEqual({ ok: false, message: 'There is nothing in the pool to withdraw.' });
+    expect(manualOutcome(fail('fatal error="stx cannot cover tx fee balance=0 fee=0.05"')).message).toContain('enough STX');
+    expect(manualOutcome('[10:00:02.000] INFO: [index] swap tx=0xabc ok=false status="abort_by_post_condition"\n').ok).toBe(false);
+    expect(manualOutcome('[10:00:02.000] INFO: [index] withdraw_liquidity tx=0xabc ok=true status="success"\n')).toEqual({ ok: true, message: 'withdraw_liquidity tx=0xabc ok=true status="success"' });
+    expect(manualOutcome('').ok).toBe(false);
   });
 
   it('does not start a stopped bot when its settings are saved', async () => {
