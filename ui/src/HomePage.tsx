@@ -51,28 +51,29 @@ export function HomePage({ fleet, now, reload }: Shared) {
           </section>
         </>
       )}
-      {real.length && !showSims ? (
-        <button type="button" className="btn sm ghost sims-toggle" onClick={() => setShowSims(true)}>
-          Show simulations
-        </button>
-      ) : (
-        <section className="sec">
-          <div className="sec-row">
+      <section className="sec">
+        <div className="sec-row">
+          {real.length ? (
+            // With real bots the heading folds the section; without them it is always open.
+            <button type="button" className="sec-h sec-toggle" onClick={() => setShowSims(!showSims)} aria-expanded={showSims}>
+              Simulations
+              <span className={`chev${showSims ? ' open' : ''}`}>
+                <Icon name="chevron" size={14} />
+              </span>
+            </button>
+          ) : (
             <h2 className="sec-h">Simulations</h2>
-            <span className="muted">Simulated funds, to see how a bot behaves.</span>
-            {real.length ? (
-              <button type="button" className="btn sm ghost" onClick={() => setShowSims(false)}>
-                Hide
-              </button>
-            ) : null}
-          </div>
+          )}
+          <span className="muted">Simulated funds, to see how a bot behaves.</span>
+        </div>
+        {!real.length || showSims ? (
           <div className="cards">
             {previews.map((bot) => (
               <BotCard key={bot.id} bot={bot} now={now} />
             ))}
           </div>
-        </section>
-      )}
+        ) : null}
+      </section>
     </div>
   );
 }

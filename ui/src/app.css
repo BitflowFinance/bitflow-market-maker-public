@@ -78,7 +78,8 @@ html, body { margin: 0; }
 .nx .rail-toggle:hover { color: var(--ink-2); }
 .nx .chev { display: inline-flex; transition: transform .15s; }
 .nx .chev.open { transform: rotate(180deg); }
-.nx .sims-toggle { justify-self: start; }
+.nx .sec-toggle { font: inherit; font-size: 15px; font-weight: 650; color: var(--ink); background: none; border: 0; padding: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.nx .sec-toggle:hover .chev { color: var(--accent); }
 .nx .btnrow { display: inline-flex; gap: 8px; flex: none; }
 .nx .rl-main { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.25; }
 .nx .rl-t { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
