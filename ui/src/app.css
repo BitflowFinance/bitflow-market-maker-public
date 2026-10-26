@@ -427,6 +427,10 @@ html, body { margin: 0; }
 /* modal */
 .nx .modal, .modal { padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); width: min(500px, calc(100vw - 32px)); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
 .nx .modal.wide { width: min(720px, calc(100vw - 32px)); }
+.nx .modal, .modal { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.modal::-webkit-scrollbar { width: 6px; }
+.modal::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+.modal::-webkit-scrollbar-track { background: transparent; }
 .nx .modal::backdrop { background: var(--backdrop, rgba(0,0,0,.45)); backdrop-filter: blur(2px); }
 .nx .modal-in { padding: 20px 22px; display: grid; gap: 14px; }
 .nx .modal-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

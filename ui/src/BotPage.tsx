@@ -970,7 +970,9 @@ function Settings({ bot, reload }: { bot: BotView; reload: () => Promise<void> }
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [modeDialog, setModeDialog] = useState<'' | 'live' | 'dry'>('');
-  const changed = ALL_FIELDS.filter((field) => draft[field.key] !== initial[field.key]);
+  // Compare as saved values, so typing 0.10 where 0.1 is stored is not a change.
+  const isDirty = (field: FieldDef): boolean => fromDisplay(field, draft[field.key] ?? '') !== fromDisplay(field, initial[field.key] ?? '');
+  const changed = ALL_FIELDS.filter(isDirty);
 
   useEffect(() => {
     if (!changed.length) setDraft(initial);
@@ -1035,7 +1037,7 @@ function Settings({ bot, reload }: { bot: BotView; reload: () => Promise<void> }
           <Card key={group.title} title={group.title}>
             <div className="fields">
               {group.fields.map((field) => {
-                const dirty = draft[field.key] !== initial[field.key];
+                const dirty = isDirty(field);
                 return (
                   <label key={field.key} className={`sfield${dirty ? ' dirty' : ''}`}>
                     <span className="sf-l">
