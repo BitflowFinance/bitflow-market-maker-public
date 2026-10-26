@@ -48,6 +48,7 @@ const PATHS: Record<string, ReactNode> = {
   bell: <path d="M4.2 11.2V7.4a3.8 3.8 0 0 1 7.6 0v3.8l1.2 1.3H3zM6.6 13.6a1.5 1.5 0 0 0 2.8 0" />,
   bellOff: <path d="M4.2 11.2V7.4a3.8 3.8 0 0 1 6.6-2.6M11.8 7.6v3.6l1.2 1.3H5.4M3 12.5h1M6.6 13.6a1.5 1.5 0 0 0 2.8 0M2.5 2.5l11 11" />,
   edit: <path d="M10.8 2.7l2.5 2.5-7.6 7.6-3.2.7.7-3.2zM9.6 3.9l2.5 2.5" />,
+  chevron: <path d="M4 6l4 4 4-4" />,
   reset: <path d="M2.8 8a5.2 5.2 0 1 0 1.6-3.8M2.5 2.5v3h3" />,
   wallet: (
     <>

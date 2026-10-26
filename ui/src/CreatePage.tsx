@@ -31,6 +31,8 @@ export function CreatePage({ fleet, reload }: Shared) {
   const [name, setName] = useState('');
   // A strategy to start from: imported from a file, or copied from a bot (?from=<id>).
   const [strategy, setStrategy] = useState<Strategy | null>(null);
+  // Where the strategy came from, said plainly on the first step.
+  const [source, setSource] = useState('');
   const [params] = useSearchParams();
   const from = params.get('from');
 
@@ -52,7 +54,11 @@ export function CreatePage({ fleet, reload }: Shared) {
   useEffect(() => {
     if (!from) return;
     api<Strategy>(`/api/bots/${encodeURIComponent(from)}/strategy`)
-      .then((res) => applyStrategy(res, `${res.name || fleet.bots.find((bot) => bot.id === from)?.pair || 'Bot'} copy`))
+      .then((res) => {
+        const label = res.name || fleet.bots.find((bot) => bot.id === from)?.pair || 'this bot';
+        applyStrategy(res, `${label} copy`);
+        setSource(`Duplicating strategy from ${label}`);
+      })
       .catch((err: Error) => setLoadError(err.message));
     // Load the source once; the fleet refreshing must not reset what the user edits.
   }, [from]);
@@ -63,6 +69,7 @@ export function CreatePage({ fleet, reload }: Shared) {
       if (parsed.kind !== 'bitflow-mm-strategy' || !parsed.pair || !parsed.settings) throw new Error('That file is not a Bitflow MM strategy.');
       if (!profiles?.some((item) => item.id === parsed.pair)) throw new Error(`This app does not know the pair "${parsed.pair}".`);
       applyStrategy(parsed as Strategy, parsed.name || '');
+      setSource(`Imported strategy${parsed.name ? ` "${parsed.name}"` : ''} from ${file.name}`);
       toast('good', 'Strategy loaded.');
     } catch (err) {
       toast('bad', err instanceof Error ? err.message : 'Could not read that file.');
@@ -146,10 +153,15 @@ export function CreatePage({ fleet, reload }: Shared) {
           }
         >
           {strategy ? (
-            <p className="note">
-              Starting from {strategy.name ? <b>{strategy.name}</b> : 'a saved strategy'}: its pool and {Object.keys(strategy.settings).length} settings. You can change
-              them after creating the bot.
-            </p>
+            <div className="banner2 info center">
+              <Icon name="copy" />
+              <div className="grow">
+                <b>{source || 'Using a saved strategy'}</b>
+                <div className="muted">
+                  Its pool and {Object.keys(strategy.settings).length} settings carry over; the new bot gets its own wallet. You can change any of it later.
+                </div>
+              </div>
+            </div>
           ) : null}
           <div className="poolpick">
             {profiles.map((item) => {

@@ -76,6 +76,8 @@ html, body { margin: 0; }
 .nx .rl.on { background: color-mix(in srgb, var(--ink) 11%, transparent); color: var(--ink); }
 .nx .rail-toggle { font: inherit; font-size: 11px; background: none; border: 0; cursor: pointer; width: 100%; justify-content: space-between; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); font-weight: 600; padding: 16px 10px 6px; }
 .nx .rail-toggle:hover { color: var(--ink-2); }
+.nx .chev { display: inline-flex; transition: transform .15s; }
+.nx .chev.open { transform: rotate(180deg); }
 .nx .sims-toggle { justify-self: start; }
 .nx .btnrow { display: inline-flex; gap: 8px; flex: none; }
 .nx .rl-main { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.25; }

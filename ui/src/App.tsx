@@ -175,7 +175,9 @@ function Shell({
           // Once a real bot exists the simulations are reference, so they fold away.
           <button type="button" className="rail-h rail-toggle" onClick={() => setShowSims(!showSims)} aria-expanded={showSims}>
             Simulations
-            <Icon name={showSims ? 'x' : 'plus'} size={11} />
+            <span className={`chev${showSims ? ' open' : ''}`}>
+              <Icon name="chevron" size={12} />
+            </span>
           </button>
         ) : (
           <div className="rail-h">Simulations</div>
