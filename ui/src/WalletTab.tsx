@@ -378,7 +378,7 @@ export function WalletTab({ bot, reload }: { bot: BotView; reload: () => Promise
           <div className="fact-row">
             <dt>In wallet</dt>
             <dd>
-              {tok(bot.walletBase, bot.baseSymbol)} · {tok(bot.walletQuote, bot.quoteSymbol)}
+              {tok(bot.liveWallet ? bot.liveWallet.base : bot.walletBase, bot.baseSymbol)} · {tok(bot.liveWallet ? bot.liveWallet.quote : bot.walletQuote, bot.quoteSymbol)}
             </dd>
           </div>
           <div className="fact-row">
@@ -388,7 +388,10 @@ export function WalletTab({ bot, reload }: { bot: BotView; reload: () => Promise
             </dd>
           </div>
         </dl>
-        {bot.lastCheckAt ? <p className="note">As of {clock(bot.holdingsAsOf)}.</p> : <p className="note">Balances show after the bot's first check.</p>}
+        <p className="note">
+          {bot.liveWallet ? `Wallet read from the chain at ${clock(bot.liveWallet.asOf)}. ` : ''}
+          {bot.holdingsAsOf ? `Pool as of the bot's check at ${clock(bot.holdingsAsOf)}.` : 'The pool shows after the bot\'s first check.'}
+        </p>
       </Card>
       <KeyCard bot={bot} reload={reload} />
       {bot.strayTokens.length ? (

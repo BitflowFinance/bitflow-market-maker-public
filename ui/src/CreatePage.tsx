@@ -110,7 +110,6 @@ export function CreatePage({ fleet, reload }: Shared) {
                   <span className="po-h">
                     <b>{item.pair}</b>
                   </span>
-                  <span className="po-b">{item.blurb}</span>
                 </>
               );
               return item.taken ? (
@@ -274,8 +273,8 @@ export function CreatePage({ fleet, reload }: Shared) {
                 </tr>
               </thead>
               <tbody>
-                <FundRow symbol={pool.baseSymbol} suggested={pool.suggest.base} have={created?.walletBase ?? null} />
-                <FundRow symbol={pool.quoteSymbol} suggested={pool.suggest.quote} have={created?.walletQuote ?? null} />
+                <FundRow symbol={pool.baseSymbol} suggested={pool.suggest.base} have={created ? (created.liveWallet ? created.liveWallet.base : created.walletBase) : null} />
+                <FundRow symbol={pool.quoteSymbol} suggested={pool.suggest.quote} have={created ? (created.liveWallet ? created.liveWallet.quote : created.walletQuote) : null} />
                 {pool.baseSymbol !== 'STX' ? (
                   <tr>
                     <td>STX (fees)</td>

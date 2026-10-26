@@ -16,6 +16,7 @@ import {
   BinBar,
   BookView,
   BotRecord,
+  API_KEY_NAMES,
   BotView,
   CashOutJob,
   PoolSwitchJob,
@@ -25,6 +26,7 @@ import {
   bookOf,
   humanReason,
   liveBlockedBy,
+  valuedTick,
   parseLogLine,
   toView,
   validateSettings,
@@ -109,7 +111,7 @@ export interface CreateInput {
   signerAddress?: string;
 }
 
-const SECRET_KEYS = ['SIGNER_KEY', 'COINGECKO_API_KEY', 'BFF_API_KEY'];
+const SECRET_KEYS = ['SIGNER_KEY', ...API_KEY_NAMES];
 
 const templateFor = (root: string, profile: Profile): string => {
   const example = join(root, `.env.${profile.id}.example`);
@@ -272,7 +274,6 @@ export class ConsoleStore {
     quoteSymbol: string;
     halfWidth: number;
     taken: boolean;
-    blurb: string;
     suggest: Profile['suggest'];
   }[] {
     return PROFILE_IDS.map((id) => {
@@ -285,7 +286,6 @@ export class ConsoleStore {
         quoteSymbol: profile.quoteSymbol,
         halfWidth: profile.halfWidth,
         taken: existsSync(this.envPath(id)),
-        blurb: profile.blurb,
         suggest: profile.suggest,
       };
     });
@@ -487,6 +487,23 @@ export class ConsoleStore {
     const outcome = manualOutcome(output);
     if (!outcome.ok) throw new HttpError(502, 'manual_failed', outcome.message);
     return { ok: true, output: outcome.message };
+  }
+
+  /** Sets or clears an optional provider key. The server gates this route to the page; the value is never returned. */
+  async setApiKey(id: string, name: string, value: string): Promise<BotView> {
+    if (id.startsWith('preview-')) throw new HttpError(400, 'preview', 'Preview bots have no settings file.');
+    if (API_KEY_NAMES.indexOf(name) < 0) throw new HttpError(400, 'unknown_key', 'That is not a key the bot uses.');
+    const trimmed = value.trim();
+    // Keys go into an env file line and an HTTP header, so no spaces, quotes or newlines.
+    if (trimmed && !/^[A-Za-z0-9._~+/=-]{8,256}$/.test(trimmed)) {
+      throw new HttpError(400, 'bad_key', 'That does not look like an API key. Paste it without spaces or quotes.');
+    }
+    const profile = this.requireProfile(id);
+    this.refuseDuringJob(profile.id);
+    writeEnvUpdates(this.envPath(profile.id), { [name]: trimmed });
+    const failed = await this.restart(profile.id);
+    if (failed) throw new HttpError(500, 'start_failed', `Saved, but the bot did not restart: ${failed}`);
+    return this.one(id, Date.now());
   }
 
   /** The raw key, for the page's backup step only. The server gates this route to the page. */
@@ -775,6 +792,7 @@ export class ConsoleStore {
     const history = file.recent.length ? file.recent : running ? (await this.host.readRemote(profile.id, port)).history : [];
     const lastTick = history.length ? history[history.length - 1] : null;
     const address = env.SIGNER_ADDRESS || null;
+    const chain = address ? this.walletTokens.peek(address) : null;
     const poolId = env.POOL_ID || profile.poolId;
     const depth =
       env.BFF_API_VERSION === 'v1'
@@ -786,7 +804,7 @@ export class ConsoleStore {
             quoteDecimals: profile.quoteDecimals,
             apiBase: env.BFF_API_BASE_URL,
           });
-    let bins = depth ? depth.bars : barsFromTick(lastTick);
+    let bins = depth ? depth.bars : barsFromTick(valuedTick(history) || lastTick);
     if (depth && !depth.oursExact) {
       // Shares unreadable: mark the bins the bot last reported as ours, at full height.
       const owned = new Set(lastTick?.ownedBinIds || []);
@@ -817,9 +835,18 @@ export class ConsoleStore {
       startError: running ? null : this.startErrors.get(profile.id) || null,
       cashOut: this.cashOuts.get(profile.id) || null,
       poolSwitch: this.poolSwitches.get(profile.id) || null,
-      strayTokens: address
-        ? (this.walletTokens.peek(address) || []).filter((token) => token.contract !== profile.baseContract && token.contract !== profile.quoteContract)
+      strayTokens: chain
+        ? chain.tokens.filter((token) => token.contract !== profile.baseContract && token.contract !== profile.quoteContract)
         : [],
+      liveWallet: chain
+        ? {
+            // The STX pool's base side is the STX wrapper, whose balance is native STX.
+            base: profile.baseSymbol === 'STX' ? chain.stx : chain.tokens.find((token) => token.contract === profile.baseContract)?.amount || 0,
+            quote: chain.tokens.find((token) => token.contract === profile.quoteContract)?.amount || 0,
+            stx: chain.stx,
+            asOf: new Date(chain.at).toISOString(),
+          }
+        : null,
       insights: insightsOf(file.points, file.lastTrade, Date.now()),
       priceScale: Math.pow(10, profile.baseDecimals - profile.quoteDecimals),
     };

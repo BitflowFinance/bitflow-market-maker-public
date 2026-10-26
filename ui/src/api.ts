@@ -124,6 +124,9 @@ export interface BotView {
   poolSwitch: PoolSwitchJob | null;
   poolEdgeRoom: number | null;
   strayTokens: Array<{ contract: string; symbol: string; amount: number; known: boolean }>;
+  /** Wallet balances read from the chain every few seconds, even while the bot is paused or stopped. */
+  liveWallet: { base: number; quote: number; stx: number; asOf: string } | null;
+  keysSet: Record<string, boolean>;
   readFailures: { count: number; max: number } | null;
 }
 
@@ -201,7 +204,6 @@ export interface ProfileInfo {
   quoteSymbol: string;
   halfWidth: number;
   taken: boolean;
-  blurb: string;
   suggest: { base: string; quote: string; gas: string; note: string };
 }
 

@@ -1,10 +1,12 @@
-// Every token a bot wallet holds, so the page can flag ones its pool doesn't use
-// (an sBTC transfer sent to the STX bot by mistake). Self-contained for the same
-// reason as poolDepth.ts: the bot's own readers load config.ts and a .env file.
+// Every token a bot wallet holds, read straight from the chain. The page shows
+// balances from it even when the bot is paused or stopped (and so not reading
+// them), and flags tokens its pool doesn't use (sBTC sent to the STX bot).
+// Self-contained for the same reason as poolDepth.ts: the bot's own readers load
+// config.ts and a .env file.
 
 const HIRO = 'https://api.hiro.so';
 const BFF = 'https://bff.bitflowapis.finance/api';
-const FRESH_MS = 60_000;
+const FRESH_MS = 20_000;
 const TOKENS_FRESH_MS = 10 * 60_000;
 
 export interface HeldToken {
@@ -15,9 +17,16 @@ export interface HeldToken {
   known: boolean;
 }
 
+export interface WalletRead {
+  /** Native STX, in whole STX. */
+  stx: number;
+  tokens: HeldToken[];
+  at: number;
+}
+
 export interface WalletTokenReader {
-  /** Last read of the wallet's tokens (or null), refreshing in the background. */
-  peek(address: string): HeldToken[] | null;
+  /** Last read of the wallet (or null), refreshing in the background. */
+  peek(address: string): WalletRead | null;
 }
 
 export const noWalletTokens: WalletTokenReader = { peek: () => null };
@@ -57,7 +66,7 @@ export const heldTokensOf = (
 };
 
 export const liveWalletTokens = (): WalletTokenReader => {
-  const cache = new Map<string, { at: number; value: HeldToken[] }>();
+  const cache = new Map<string, WalletRead>();
   const inflight = new Set<string>();
   let known: { at: number; tokens: BffToken[] } | null = null;
 
@@ -70,10 +79,14 @@ export const liveWalletTokens = (): WalletTokenReader => {
 
   const refresh = async (address: string): Promise<void> => {
     const [balances, tokens] = await Promise.all([
-      getJson<{ fungible_tokens?: Record<string, { balance?: string }> }>(`${HIRO}/extended/v1/address/${address}/balances`),
+      getJson<{ stx?: { balance?: string }; fungible_tokens?: Record<string, { balance?: string }> }>(`${HIRO}/extended/v1/address/${address}/balances`),
       tokenList(),
     ]);
-    cache.set(address, { at: Date.now(), value: heldTokensOf(balances.fungible_tokens || {}, tokens) });
+    cache.set(address, {
+      stx: Number(balances.stx?.balance || '0') / 1e6,
+      tokens: heldTokensOf(balances.fungible_tokens || {}, tokens),
+      at: Date.now(),
+    });
   };
 
   return {
@@ -85,7 +98,7 @@ export const liveWalletTokens = (): WalletTokenReader => {
           .catch(() => undefined)
           .finally(() => inflight.delete(address));
       }
-      return hit ? hit.value : null;
+      return hit || null;
     },
   };
 };

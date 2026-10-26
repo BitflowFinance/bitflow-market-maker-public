@@ -401,6 +401,20 @@ describe('local console', () => {
     expect(manualOutcome('').ok).toBe(false);
   });
 
+  it('sets API keys only from the page and never returns them', async () => {
+    const { call, root } = boot();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: createWallet().key });
+    const key = 'hiro_live_abcdef1234567890';
+    expect((await call('POST', '/api/bots/sbtc/api-key', { name: 'STACKS_NODE_KEY', value: key })).status).toBe(403);
+    expect((await call('POST', '/api/bots/sbtc/api-key', { name: 'SIGNER_KEY', value: key }, PAGE)).status).toBe(400);
+    expect((await call('POST', '/api/bots/sbtc/api-key', { name: 'STACKS_NODE_KEY', value: 'has spaces in it' }, PAGE)).status).toBe(400);
+    const saved = await call('POST', '/api/bots/sbtc/api-key', { name: 'STACKS_NODE_KEY', value: key }, PAGE);
+    expect((saved.body as { keysSet: Record<string, boolean> }).keysSet.STACKS_NODE_KEY).toBe(true);
+    expect(JSON.stringify((await call('GET', '/api/fleet')).body)).not.toContain(key);
+    expect(readFileSync(join(root, '.env.sbtc'), 'utf8')).toContain(`STACKS_NODE_KEY=${key}`);
+    expect((await call('POST', '/api/bots/sbtc/settings', { settings: { STACKS_NODE_KEY: 'x' } })).status).toBe(400);
+  });
+
   it('does not start a stopped bot when its settings are saved', async () => {
     const { call, host } = boot();
     await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: createWallet().key });

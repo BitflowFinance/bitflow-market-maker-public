@@ -111,9 +111,7 @@ function Shell({
   // The chip takes the worst state among running bots, so a failing read can't hide behind a recent check.
   const RANK: Record<Tone, number> = { good: 0, info: 1, unknown: 2, warn: 3, serious: 4 };
   const connTone = running.reduce<Tone>((worst, bot) => (RANK[bot.state.tone] > RANK[worst] ? bot.state.tone : worst), 'good');
-  const connTitle = running
-    .map((bot) => `${bot.pair}: ${bot.state.label.toLowerCase()}, checked ${ago(bot.lastCheckAt, now)}${bot.reason ? `. ${bot.reason.text}` : ''}`)
-    .join('\n');
+
   const needCount = fleet.needs.length;
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -133,9 +131,22 @@ function Shell({
             Offline
           </span>
         ) : connLabel ? (
-          <span className={`conn t-${connTone}`} title={connTitle}>
+          <span className={`conn t-${connTone}`} tabIndex={0} aria-describedby="conn-tip">
             <Dot tone={connTone} />
             {connLabel}
+            {/* A native title never shows here: the label changes every second, which resets the browser's hover timer. */}
+            <span className="tip" id="conn-tip" role="tooltip">
+              <span className="tip-h">Running bots</span>
+              {running.map((bot) => (
+                <span key={bot.id} className="tip-row">
+                  <Dot tone={bot.state.tone} />
+                  <span>
+                    <b>{bot.pair}</b> · {bot.state.label.toLowerCase()} · checked {ago(bot.lastCheckAt, now)}
+                    {bot.reason ? <span className="tip-sub">{bot.reason.text}</span> : null}
+                  </span>
+                </span>
+              ))}
+            </span>
           </span>
         ) : null}
         <NotifyButton on={notify} setOn={setNotify} />

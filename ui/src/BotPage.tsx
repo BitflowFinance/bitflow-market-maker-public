@@ -5,6 +5,7 @@ import type { Shared } from './App';
 import { BinChart, ValueChart } from './charts';
 import { ago, clock, countdown, pct, poolName, price, shortAddr, stx, tok, usd } from './format';
 import { Card, CopyButton, Dot, Empty, Icon, Modal, ModeBadge, RiskConfirm, Seg, Stat, downloadFile, useToast } from './ui';
+import { KeysCard } from './KeysCard';
 import { PoolCard } from './PoolCard';
 import { WalletTab } from './WalletTab';
 
@@ -344,6 +345,11 @@ function Overview({ bot, now }: { bot: BotView; now: number }) {
               </tr>
             </tbody>
           </table>
+          {bot.liveWallet && (Math.abs(bot.liveWallet.base - (bot.walletBase ?? 0)) > 1e-9 || Math.abs(bot.liveWallet.quote - (bot.walletQuote ?? 0)) > 1e-6) ? (
+            <p className="note">
+              The wallet holds {tok(bot.liveWallet.base, bot.baseSymbol)} · {tok(bot.liveWallet.quote, bot.quoteSymbol)} on chain now; the table updates at the bot's next check.
+            </p>
+          ) : null}
           {!stxPool && bot.gasTxLeft != null ? (
             <p className="note">STX pays every transaction fee. Enough for about {bot.gasTxLeft} more.</p>
           ) : stxPool ? (
@@ -1014,6 +1020,7 @@ function Settings({ bot, reload }: { bot: BotView; reload: () => Promise<void> }
         </div>
       </Card>
       {ro ? null : <PoolCard bot={bot} reload={reload} />}
+      {ro ? null : <KeysCard bot={bot} reload={reload} />}
       <form
         className="stack"
         onSubmit={(event) => {
@@ -1193,7 +1200,7 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
   const wallet = `${tok(bot.walletBase, bot.baseSymbol)} · ${tok(bot.walletQuote, bot.quoteSymbol)}`;
   // Balances from the last check; null means unknown, which leaves the action open.
   const nothingInPool = bot.ownedBase === 0 && bot.ownedQuote === 0;
-  const walletEmpty = bot.walletBase === 0 && bot.walletQuote === 0;
+  const walletEmpty = bot.liveWallet ? bot.liveWallet.base === 0 && bot.liveWallet.quote === 0 : bot.walletBase === 0 && bot.walletQuote === 0;
   const blockedFor = (kind: ManualKind): string => {
     if (shared) return shared;
     if (busy) return 'Another action is still running.';

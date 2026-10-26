@@ -159,6 +159,22 @@ describe('overview fields', () => {
     expect(toView(record({}), false, NOW).readFailures).toBeNull();
   });
 
+  it('keeps balances from the last real read when later checks were paused after a restart', () => {
+    const paused = { t: new Date(NOW).toISOString(), decision: 'frozen', reason: 'kill_switch', walletBase: 0, walletQuote: 0, portfolioValue: null, holdingsAsOf: null, activeBinId: -1, activeBinPrice: 0 };
+    const good = tick(10, { walletBase: 9, walletQuote: 0.3, portfolioValue: 3.05, holdingsAsOf: new Date(NOW - 600_000).toISOString(), activeBinPrice: 0.305 });
+    const view = toView({ ...record({}), lastTick: paused, history: [good, paused] }, false, NOW);
+    expect(view.walletBase).toBe(9);
+    expect(view.portfolioValue).toBe(3.05);
+    expect(view.holdingsCarried).toBe(true);
+    expect(view.decision).toBe('frozen');
+    expect(view.lastCheckAt).toBe(paused.t);
+  });
+
+  it('trusts the chain over a stale bot reading for "wallet funded"', () => {
+    const empty = { ...record({ walletBase: 0, walletQuote: 0, ownedBase: 0, ownedQuote: 0 }), liveWallet: { base: 8.95, quote: 0.3, stx: 8.95, asOf: new Date(NOW).toISOString() } };
+    expect(toView(empty, false, NOW).checklist.find((item) => item.id === 'funded')?.ok).toBe(true);
+  });
+
   it('labels wallet tokens from Bitflow’s list and drops empty ones', () => {
     const held = heldTokensOf(
       {

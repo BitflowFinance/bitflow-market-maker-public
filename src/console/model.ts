@@ -84,6 +84,13 @@ export interface PoolSwitchJob {
   lines: LogLine[];
 }
 
+export interface LiveWallet {
+  base: number;
+  quote: number;
+  stx: number;
+  asOf: string;
+}
+
 export interface BotState {
   tone: Tone;
   label: string;
@@ -205,6 +212,8 @@ export interface BotView {
   poolEdgeRoom: number | null;
   /** Tokens in the wallet that this bot's pool doesn't use. */
   strayTokens: HeldToken[];
+  liveWallet: LiveWallet | null;
+  keysSet: Record<string, boolean>;
   /** Failed data reads in a row, against the count that halts the bot. Null when the last read worked. */
   readFailures: { count: number; max: number } | null;
 }
@@ -232,6 +241,8 @@ export interface BotRecord {
   cashOut?: CashOutJob | null;
   poolSwitch?: PoolSwitchJob | null;
   strayTokens?: HeldToken[];
+  /** Wallet balances read straight from the chain, independent of the bot's checks. */
+  liveWallet?: LiveWallet | null;
   insights?: Insights | null;
   /** 10^(base decimals - quote decimals): turns the tick's raw bin price into a human one. */
   priceScale?: number;
@@ -326,8 +337,11 @@ const stxReserve = (env: Record<string, string>): string => {
   return `${micro / 1e6} STX`;
 };
 
+/** Optional provider keys. Like SIGNER_KEY they are written, never read back; the page only learns whether each is set. */
+export const API_KEY_NAMES = ['STACKS_NODE_KEY', 'BFF_API_KEY', 'COINGECKO_API_KEY'];
+
 export const publicSettings = (env: Record<string, string>): Record<string, string> => {
-  const hidden = new Set(['SIGNER_KEY', 'COINGECKO_API_KEY', 'BFF_API_KEY']);
+  const hidden = new Set(['SIGNER_KEY', ...API_KEY_NAMES]);
   const out: Record<string, string> = {};
   for (const key of Object.keys(env)) {
     if (hidden.has(key)) continue;
@@ -517,7 +531,11 @@ export const needsOf = (record: BotRecord, nowMs: number): NeedItem[] => {
 export const checklistOf = (record: BotRecord, sharedAddress: boolean): CheckItem[] => {
   const tick = record.lastTick;
   const checked = tick != null && tick.decision !== 'no_data';
-  const funded = tick != null && ((tick.walletQuote || 0) > 0 || (tick.walletBase || 0) > 0 || (tick.ownedQuote || 0) > 0);
+  // The chain's own balance beats the bot's, which is stale while it is paused or stopped.
+  const live = record.liveWallet;
+  const funded = live
+    ? live.base > 0 || live.quote > 0 || (tick?.ownedQuote || 0) > 0 || (tick?.ownedBase || 0) > 0
+    : tick != null && ((tick.walletQuote || 0) > 0 || (tick.walletBase || 0) > 0 || (tick.ownedQuote || 0) > 0);
   const backedUp = keyBackedUp(record.env);
   return [
     {
@@ -739,9 +757,27 @@ const inventoryOf = (record: BotRecord, computed: number | null): InventoryView 
   };
 };
 
+/**
+ * The newest check that actually read balances. A paused bot skips the read, and
+ * a restarted one has nothing to carry forward, so its checks record zeros that
+ * were never read; showing those would blank the overview and claim an empty wallet.
+ */
+export const valuedTick = (history: TickLike[]): TickLike | null => {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const tick = history[i];
+    // Ticks written before holdingsAsOf existed count when they carry a value.
+    if (tick.holdingsAsOf != null || (tick.holdingsAsOf === undefined && tick.portfolioValue != null)) return tick;
+  }
+  return null;
+};
+
 export const toView = (record: BotRecord, sharedAddress: boolean, nowMs: number): BotView => {
-  const tick = record.lastTick;
-  const price = priceOf(record);
+  const latest = record.lastTick;
+  const valued = valuedTick(record.history) || latest;
+  // Status comes from the latest check; balances, price and value from the last one that read them.
+  const shown: BotRecord = { ...record, lastTick: valued };
+  const tick = valued;
+  const price = priceOf(shown);
   const value = tick ? (tick.portfolioValue ?? null) : null;
   const baseValue = tick && price != null ? ((tick.walletBase || 0) + (tick.ownedBase || 0)) * price : null;
   return {
@@ -758,13 +794,13 @@ export const toView = (record: BotRecord, sharedAddress: boolean, nowMs: number)
     keySet: record.keySet,
     address: record.address,
     tickIntervalMs: intervalOf(record.env),
-    lastCheckAt: tick ? tick.t : null,
+    lastCheckAt: latest ? latest.t : null,
     holdingsAsOf: tick ? tick.holdingsAsOf || tick.t : null,
-    holdingsCarried: Boolean(tick && tick.holdingsCarried),
-    decision: tick ? tick.decision : null,
-    reason: tick ? humanReason(tick.reason, tick.decision) : null,
-    reasonRaw: tick ? tick.reason || null : null,
-    wouldSend: Boolean(tick && tick.decision === 'rebalance' && !tick.executed),
+    holdingsCarried: Boolean(tick && (tick !== latest || tick.holdingsCarried)),
+    decision: latest ? latest.decision : null,
+    reason: latest ? humanReason(latest.reason, latest.decision) : null,
+    reasonRaw: latest ? latest.reason || null : null,
+    wouldSend: Boolean(latest && latest.decision === 'rebalance' && !latest.executed),
     state: stateOf(record, nowMs),
     price,
     walletBase: tick && tick.walletBase != null ? tick.walletBase : null,
@@ -773,13 +809,13 @@ export const toView = (record: BotRecord, sharedAddress: boolean, nowMs: number)
     ownedQuote: tick && tick.ownedQuote != null ? tick.ownedQuote : null,
     portfolioValue: value,
     pnlVsHodl: tick ? (tick.pnlVsHodl ?? null) : null,
-    inPoolValue: inPool(record),
+    inPoolValue: inPool(shown),
     inventoryShare: value && baseValue != null && value > 0 ? baseValue / value : null,
     walletStx: tick && tick.walletStx != null ? tick.walletStx : null,
-    gasTxLeft: gasTxLeftOf(record),
-    market: marketOf(record),
-    inventory: inventoryOf(record, value && baseValue != null && value > 0 ? baseValue / value : null),
-    curve: curveOf(record),
+    gasTxLeft: gasTxLeftOf(shown),
+    market: marketOf(shown),
+    inventory: inventoryOf(shown, value && baseValue != null && value > 0 ? baseValue / value : null),
+    curve: curveOf(shown),
     insights: record.insights || null,
     binsOursExact: record.binsOursExact !== false,
     poolContract: record.poolContract || null,
@@ -805,6 +841,8 @@ export const toView = (record: BotRecord, sharedAddress: boolean, nowMs: number)
     poolSwitch: record.poolSwitch || null,
     poolEdgeRoom: edgeRoomOf(record),
     strayTokens: record.strayTokens || [],
+    liveWallet: record.liveWallet || null,
+    keysSet: Object.fromEntries(API_KEY_NAMES.map((name) => [name, Boolean(record.env[name])])),
     readFailures: readFailuresOf(record),
   };
 };

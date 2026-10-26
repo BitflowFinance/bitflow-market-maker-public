@@ -158,6 +158,13 @@ export const handleConsole = async (store: ConsoleStore, req: ConsoleRequest, no
       requirePage(req);
       return { status: 200, body: await store.keySaved(id, typeof body.keyTail === 'string' ? body.keyTail : '') };
     }
+    if (action === 'api-key') {
+      requirePage(req);
+      return {
+        status: 200,
+        body: await store.setApiKey(id, typeof body.name === 'string' ? body.name : '', typeof body.value === 'string' ? body.value : ''),
+      };
+    }
     if (action === 'payout') {
       requirePage(req);
       return {
