@@ -6,12 +6,11 @@ import { RangeStrip, Sparkline, ValueChart, mergeSeries } from './charts';
 import { ago, pct, usd } from './format';
 import { Card, Dot, Icon, ModeBadge, Stat, Status, useToast } from './ui';
 
-export function HomePage({ fleet, now, reload }: Shared) {
+export function HomePage({ fleet, now, reload, showBots, setShowBots }: Shared) {
   const real = fleet.bots.filter((bot) => !bot.preview);
   const previews = fleet.bots.filter((bot) => bot.preview);
   const book = fleet.book.real;
   const [showSims, setShowSims] = useState(false);
-  const [showBots, setShowBots] = useState(true);
   return (
     <div className="page">
       {real.length === 0 ? (

@@ -615,7 +615,8 @@ const keyBackedUp = (record: BotRecord): boolean => {
   const source = record.env.KEY_SOURCE;
   // Imported keys and the user's own phrase are already the user's to keep.
   if (source === 'import' || source === 'phrase') return true;
-  if (source === 'app-phrase') return Boolean(record.phraseBackedUp);
+  // An app-phrase bot whose phrase file no longer matches falls back to its own key backup.
+  if (source === 'app-phrase' && record.phraseBackedUp) return true;
   return Boolean(record.env.KEY_BACKUP_AT);
 };
 

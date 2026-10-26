@@ -20,7 +20,19 @@ export interface Shared {
   fleet: Fleet;
   reload: () => Promise<void>;
   now: number;
+  /** Whether Your bots is unfolded; one flag for the rail and Overview, remembered across visits. */
+  showBots: boolean;
+  setShowBots: (open: boolean) => void;
 }
+
+const BOTS_KEY = 'mm.showBots';
+const savedShowBots = (): boolean => {
+  try {
+    return localStorage.getItem(BOTS_KEY) !== '0';
+  } catch {
+    return true;
+  }
+};
 
 export function App() {
   const [fleet, setFleet] = useState<Fleet | null>(null);
@@ -114,7 +126,15 @@ function Shell({
 
   const needCount = fleet.needs.length;
   const [showSims, setShowSims] = useState(false);
-  const [showBots, setShowBots] = useState(true);
+  const [showBots, setShowBotsState] = useState(savedShowBots);
+  const setShowBots = (open: boolean) => {
+    setShowBotsState(open);
+    try {
+      localStorage.setItem(BOTS_KEY, open ? '1' : '0');
+    } catch {
+      // Private windows may refuse storage; the fold still works for this visit.
+    }
+  };
   // A folded section still lists the bot being viewed, so the rail always shows where you are.
   const current = loc.pathname.startsWith('/bots/') ? decodeURIComponent(loc.pathname.slice('/bots/'.length)) : '';
   const shownBots = showBots ? real : real.filter((bot) => bot.id === current);
@@ -122,7 +142,7 @@ function Shell({
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [loc.pathname]);
-  const shared: Shared = { fleet, reload, now };
+  const shared: Shared = { fleet, reload, now, showBots, setShowBots };
   return (
     <div className="shell">
       <header className="topbar">

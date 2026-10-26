@@ -98,7 +98,7 @@ export function CreatePage({ fleet, reload }: Shared) {
   const created = fleet.bots.find((bot) => bot.id === createdId);
   const steps = stepsFor(createdId ? backupNeeded : wallet === 'create' && !walletInfo?.backedUp);
   const words = wordCount(phrase);
-  const walletOk = wallet === 'create' || (wallet === 'import' ? keyOk : account != null && !accounts?.find((item) => item.account === account)?.bot);
+  const walletOk = (wallet === 'create' && !walletInfo?.problem) || (wallet === 'import' ? keyOk : account != null && !accounts?.find((item) => item.account === account)?.bot);
 
   const findAccounts = async () => {
     setFinding(true);
@@ -262,7 +262,9 @@ export function CreatePage({ fleet, reload }: Shared) {
             ]}
           />
           {wallet === 'create' ? (
-            walletInfo?.hasPhrase ? (
+            walletInfo?.problem ? (
+              <p className="form-err">{walletInfo.problem}</p>
+            ) : walletInfo?.hasPhrase ? (
               <div className="banner2 info center">
                 <Icon name="wallet" />
                 <div className="grow">
@@ -320,7 +322,7 @@ export function CreatePage({ fleet, reload }: Shared) {
                     >
                       <span className="pl-h">
                         <b>Account {item.account + 1}</b>
-                        {item.bot ? <span className="tag">Bot {item.bot}</span> : item.used ? <span className="tag t-warn">Has history</span> : item.used === false ? <span className="tag t-good">Unused</span> : null}
+                        {item.bot ? <span className="tag">Bot {item.bot}</span> : item.used ? <span className="tag t-warn">In use</span> : item.used === false ? <span className="tag t-good">Unused</span> : null}
                       </span>
                       <span className="pl-facts mono">{item.address}</span>
                     </button>
@@ -330,7 +332,7 @@ export function CreatePage({ fleet, reload }: Shared) {
               {account != null && accounts?.find((item) => item.account === account)?.used ? (
                 <div className="banner2 warn">
                   <Icon name="warn" />
-                  <div className="grow">This account has sent transactions before. If anything else spends from it, the bot's nonces and balances will clash.</div>
+                  <div className="grow">This account holds funds or has sent transactions. If anything else spends from it, the bot's nonces and balances will clash.</div>
                 </div>
               ) : null}
             </div>

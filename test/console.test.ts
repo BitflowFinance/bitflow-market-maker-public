@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
@@ -548,6 +548,38 @@ describe('local console', () => {
     expect(res.status).toBe(500);
     expect(readFileSync(file, 'utf8')).toBe('not json');
     expect(saved).not.toBe('not json');
+  });
+
+  it('never shows a phrase that does not control the bot, and refuses a new app wallet once its file is lost', async () => {
+    const { call, root } = boot();
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'create' });
+    const file = join(root, '.mm-wallet');
+    const original = readFileSync(file, 'utf8');
+    // A different phrase in its place (a bad restore) must not pass as this bot's backup.
+    writeFileSync(file, JSON.stringify({ phrase: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art', backedUpAt: new Date().toISOString() }));
+    const shown = (await call('POST', '/api/bots/stx/key-backup', { acknowledged: true }, PAGE)).body as { kind: string };
+    expect(shown.kind).toBe('key');
+    expect(((await call('GET', '/api/bots/stx')).body as { keyBackedUp: boolean }).keyBackedUp).toBe(false);
+
+    rmSync(file);
+    expect(((await call('GET', '/api/wallet')).body as { problem: string | null }).problem).toContain('.mm-wallet');
+    const refused = await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'create' });
+    expect(refused.status).toBe(409);
+    expect(existsSync(file)).toBe(false);
+    writeFileSync(file, original);
+    expect((await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'create' })).status).toBe(200);
+  });
+
+  it('gives overlapping creates their own ids and accounts', async () => {
+    const { call } = boot();
+    const [a, b] = await Promise.all([
+      call('POST', '/api/bots', { profile: 'stx', wallet: 'create' }),
+      call('POST', '/api/bots', { profile: 'stx', wallet: 'create' }),
+    ]);
+    const botA = (a.body as { bot: { id: string; address: string } }).bot;
+    const botB = (b.body as { bot: { id: string; address: string } }).bot;
+    expect(botA.id).not.toBe(botB.id);
+    expect(botA.address).not.toBe(botB.address);
   });
 
   it('imports a phrase account without storing the phrase, and refuses a wallet another bot uses', async () => {

@@ -51,7 +51,7 @@ type BotProfile = Profile & { pairId: string };
 const BOT_ID = /^[a-z0-9][a-z0-9-]{0,40}$/;
 const ENV_FILE = /^\.env\.([a-z0-9][a-z0-9-]{0,40})$/;
 import { walletFromPrivateKey } from './wallet';
-import { accountOf, isPhrase, newPhrase } from './phrase';
+import { MAX_ACCOUNT, accountOf, isPhrase, newPhrase } from './phrase';
 
 export class HttpError extends Error {
   status: number;
@@ -202,6 +202,8 @@ export class ConsoleStore {
   depth: PoolDepthReader;
   pools: PoolCatalogReader;
   walletTokens: WalletTokenReader;
+  private creating: Promise<void> = Promise.resolve();
+  private derived = new Map<string, string>();
   /** Pause between checks while confirming a pool change; tests swap in an instant one. */
   wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
   private histories = new Map<string, HistoryFile>();
@@ -380,6 +382,17 @@ export class ConsoleStore {
   }
 
   async create(input: CreateInput): Promise<{ bot: BotView; funding: Profile['suggest']; backupNeeded: boolean }> {
+    // One at a time: id, account and port are picked before an await, so two
+    // overlapping creates could pick the same id and overwrite one env file.
+    const run = this.creating.then(() => this.createOne(input));
+    this.creating = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async createOne(input: CreateInput): Promise<{ bot: BotView; funding: Profile['suggest']; backupNeeded: boolean }> {
     const profile = profileById(input.profile);
     if (!profile) throw new HttpError(400, 'unknown_pool', 'Pick the sBTC pool or the STX pool.');
     const settings = input.settings || {};
@@ -408,8 +421,15 @@ export class ConsoleStore {
         keySource = 'phrase';
       } else {
         // One app phrase for every bot it creates, one account each, so a single backup covers them all.
+        if (!this.appWallet(false) && this.botIds().some((bot) => readEnvFile(this.envPath(bot)).KEY_SOURCE === 'app-phrase')) {
+          throw new HttpError(
+            409,
+            'wallet_file',
+            `${APP_WALLET_FILE} is missing but bots were made from it. Restore it from your backup before making another app wallet.`,
+          );
+        }
         const wallet = this.appWallet(true) as AppWallet;
-        account = this.nextAppAccount();
+        account = this.nextAppAccount(wallet.phrase);
         material = accountOf(wallet.phrase, account);
         keySource = 'app-phrase';
       }
@@ -567,7 +587,7 @@ export class ConsoleStore {
     }
     const env = readEnvFile(this.envPath(profile.id));
     if (!env.SIGNER_KEY || !env.SIGNER_ADDRESS) throw new HttpError(409, 'no_wallet', 'This bot has no wallet key.');
-    const wallet = env.KEY_SOURCE === 'app-phrase' ? this.appWallet(false) : null;
+    const wallet = this.appPhraseOf(env);
     if (wallet) {
       return { kind: 'phrase', address: env.SIGNER_ADDRESS, phrase: wallet.phrase, account: Number(env.WALLET_ACCOUNT || 0), pair: profile.pair, file: APP_WALLET_FILE };
     }
@@ -581,7 +601,7 @@ export class ConsoleStore {
     const envPath = this.envPath(profile.id);
     const env = readEnvFile(envPath);
     const tail = keyTail.trim().toLowerCase();
-    const wallet = env.KEY_SOURCE === 'app-phrase' ? this.appWallet(false) : null;
+    const wallet = this.appPhraseOf(env);
     if (wallet) {
       // The phrase's last word proves the copy was made; one backup covers every bot on it.
       if (tail !== wallet.phrase.split(' ').slice(-1)[0]) throw new HttpError(400, 'key_tail', 'That is not the last word of the phrase you saved.');
@@ -674,9 +694,20 @@ export class ConsoleStore {
   }
 
   /** Whether the app has its own phrase, whether it is backed up, and the account the next bot gets. Never the phrase. */
-  walletInfo(): { hasPhrase: boolean; backedUp: boolean; nextAccount: number } {
-    const wallet = this.appWallet(false);
-    return { hasPhrase: Boolean(wallet), backedUp: Boolean(wallet?.backedUpAt), nextAccount: this.nextAppAccount() };
+  walletInfo(): { hasPhrase: boolean; backedUp: boolean; nextAccount: number; problem: string | null } {
+    let wallet: AppWallet | null = null;
+    try {
+      wallet = this.appWallet(false);
+    } catch (err) {
+      return { hasPhrase: false, backedUp: false, nextAccount: 0, problem: (err as Error).message };
+    }
+    const orphaned = !wallet && this.botIds().some((bot) => readEnvFile(this.envPath(bot)).KEY_SOURCE === 'app-phrase');
+    return {
+      hasPhrase: Boolean(wallet),
+      backedUp: Boolean(wallet?.backedUpAt),
+      nextAccount: wallet ? this.nextAppAccount(wallet.phrase) : 0,
+      problem: orphaned ? `${APP_WALLET_FILE} is missing but bots were made from it. Restore it from your backup before making another app wallet.` : null,
+    };
   }
 
   /** The first accounts of a phrase the user pastes, with which ones already have history or a bot. The phrase is not kept. */
@@ -708,25 +739,47 @@ export class ConsoleStore {
     return wallet;
   }
 
-  /** The app wallet for status display; a broken file reads as absent here rather than failing the whole page. */
-  private appWalletQuiet(): AppWallet | null {
+  /**
+   * The app wallet, only if it really derives this bot's address. A replaced or
+   * restored-wrong .mm-wallet must never be shown as the backup for a bot it does
+   * not control; such a bot is then treated as a plain key. A broken file reads as
+   * absent here rather than failing the whole page.
+   */
+  private appPhraseOf(env: Record<string, string>): AppWallet | null {
+    if (env.KEY_SOURCE !== 'app-phrase' || !env.SIGNER_ADDRESS) return null;
+    let wallet: AppWallet | null;
     try {
-      return this.appWallet(false);
+      wallet = this.appWallet(false);
     } catch {
       return null;
     }
+    if (!wallet) return null;
+    return this.addressOf(wallet.phrase, Number(env.WALLET_ACCOUNT || 0)) === env.SIGNER_ADDRESS ? wallet : null;
+  }
+
+  // Seed derivation is deliberately slow (PBKDF2), and the fleet view asks on every refresh.
+  private addressOf(phrase: string, account: number): string {
+    const key = `${account} ${phrase}`;
+    let address = this.derived.get(key);
+    if (!address) {
+      address = accountOf(phrase, account).address;
+      this.derived.set(key, address);
+    }
+    return address;
   }
 
   private saveAppWallet(wallet: AppWallet): void {
     writeSecretFile(join(this.root, APP_WALLET_FILE), `${JSON.stringify(wallet, null, 2)}\n`);
   }
 
-  private nextAppAccount(): number {
-    const used = this.botIds()
-      .map((bot) => readEnvFile(this.envPath(bot)))
-      .filter((env) => env.KEY_SOURCE === 'app-phrase')
-      .map((env) => Number(env.WALLET_ACCOUNT || 0));
-    return used.length ? Math.max(...used) + 1 : 0;
+  /** The account after the highest one in use, skipping any whose address another bot already runs (an imported key, say). */
+  private nextAppAccount(phrase: string): number {
+    const envs = this.botIds().map((bot) => readEnvFile(this.envPath(bot)));
+    const used = envs.filter((env) => env.KEY_SOURCE === 'app-phrase').map((env) => Number(env.WALLET_ACCOUNT || 0));
+    const taken = new Set(envs.map((env) => env.SIGNER_ADDRESS));
+    let account = used.length ? Math.max(...used) + 1 : 0;
+    while (account < MAX_ACCOUNT && taken.has(this.addressOf(phrase, account))) account += 1;
+    return account;
   }
 
   /** Renames a bot. Only the page shows the name, so the bot keeps running. */
@@ -952,7 +1005,7 @@ export class ConsoleStore {
       id: profile.id,
       profile: profile.pairId,
       name: env.BOT_NAME || null,
-      phraseBackedUp: env.KEY_SOURCE === 'app-phrase' ? Boolean(this.appWalletQuiet()?.backedUpAt) : undefined,
+      phraseBackedUp: env.KEY_SOURCE === 'app-phrase' ? Boolean(this.appPhraseOf(env)?.backedUpAt) : undefined,
       preview: false,
       pair: profile.pair,
       poolId,

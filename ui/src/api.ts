@@ -192,12 +192,14 @@ export interface WalletInfo {
   hasPhrase: boolean;
   backedUp: boolean;
   nextAccount: number;
+  /** Why a new app wallet cannot be made right now (a missing or broken .mm-wallet). */
+  problem: string | null;
 }
 
 export interface PhraseAccount {
   account: number;
   address: string;
-  /** Whether the address has sent a transaction; null when it could not be told. */
+  /** Whether the address has sent a transaction or holds funds; null when it could not be told. */
   used: boolean | null;
   /** The id of the bot already on this account, if any. */
   bot: string | null;

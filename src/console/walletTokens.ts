@@ -27,7 +27,7 @@ export interface WalletRead {
 export interface WalletTokenReader {
   /** Last read of the wallet (or null), refreshing in the background. */
   peek(address: string): WalletRead | null;
-  /** Whether an address has ever sent a transaction; null when it cannot be told. */
+  /** Whether an address has sent a transaction or holds anything; null when it cannot be told. */
   hasHistory(address: string): Promise<boolean | null>;
 }
 
@@ -104,8 +104,13 @@ export const liveWalletTokens = (): WalletTokenReader => {
     },
     hasHistory: async (address) => {
       try {
-        const res = await getJson<{ last_executed_tx_nonce?: number | null; last_mempool_tx_nonce?: number | null }>(`${HIRO}/extended/v1/address/${address}/nonces`);
-        return res.last_executed_tx_nonce != null || res.last_mempool_tx_nonce != null;
+        // Nonces alone miss an account that has only ever received funds.
+        const [nonces, balances] = await Promise.all([
+          getJson<{ last_executed_tx_nonce?: number | null; last_mempool_tx_nonce?: number | null }>(`${HIRO}/extended/v1/address/${address}/nonces`),
+          getJson<{ stx?: { balance?: string }; fungible_tokens?: Record<string, { balance?: string }> }>(`${HIRO}/extended/v1/address/${address}/balances`),
+        ]);
+        const holds = Number(balances.stx?.balance || '0') > 0 || Object.values(balances.fungible_tokens || {}).some((entry) => Number(entry.balance || '0') > 0);
+        return nonces.last_executed_tx_nonce != null || nonces.last_mempool_tx_nonce != null || holds;
       } catch {
         return null;
       }
