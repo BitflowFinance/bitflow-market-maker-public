@@ -185,7 +185,7 @@ html, body { margin: 0; }
 .nx .banner2.info { background: var(--info-bg); border-color: var(--info-line); }
 .nx .banner2.info .ico { color: var(--accent); }
 .nx .banner2.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-ink); }
-.nx .banner2.serious { background: var(--serious-bg); border-color: transparent; color: var(--serious-ink); }
+.nx .banner2.serious { background: var(--serious-bg); border-color: color-mix(in srgb, var(--serious) 40%, transparent); color: var(--serious-ink); }
 .nx .allclear { display: flex; align-items: center; gap: 9px; padding: 11px 14px; border-radius: 10px; background: color-mix(in srgb, var(--good) 10%, var(--panel)); border: 1px solid color-mix(in srgb, var(--good) 25%, transparent); color: var(--good-ink); font-weight: 550; }
 
 /* hero */
@@ -389,11 +389,12 @@ html, body { margin: 0; }
 .nx .sf-l { font-weight: 600; font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
 .nx .dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .nx .sfield.dirty .in { border-color: var(--accent); }
-.nx .toggle { display: inline-flex; align-items: center; gap: 8px; height: 36px; }
-.nx .toggle input { width: 34px; height: 20px; appearance: none; border-radius: 999px; background: var(--line); position: relative; cursor: pointer; transition: background .15s; margin: 0; }
-.nx .toggle input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--panel); transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+/* Sized to sit level with the 36px number fields beside it. */
+.nx .toggle { display: inline-flex; align-items: center; gap: 10px; height: 36px; }
+.nx .toggle input { width: 44px; height: 24px; appearance: none; border-radius: 999px; background: var(--line); position: relative; cursor: pointer; transition: background .15s; margin: 0; }
+.nx .toggle input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: var(--panel); transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
 .nx .toggle input:checked { background: var(--accent); }
-.nx .toggle input:checked::after { left: 16px; }
+.nx .toggle input:checked::after { left: 22px; }
 .nx .toggle input:disabled { opacity: .5; cursor: not-allowed; }
 .nx .savebar { position: sticky; bottom: 16px; z-index: 10; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px 10px 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--pop); box-shadow: var(--shadow); color: var(--muted); }
 .nx .savebar.show { border-color: var(--accent); color: var(--ink); }

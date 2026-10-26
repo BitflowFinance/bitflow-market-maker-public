@@ -253,7 +253,13 @@ function CashOutCard({ bot, reload }: { bot: BotView; reload: () => Promise<void
   const [error, setError] = useState('');
   const job = bot.cashOut;
   const running = job?.status === 'running';
-  const why = !bot.payoutAddress ? 'Set a payout address first.' : running ? 'Cash out is running.' : '';
+  // The chain's balance, since the bot's own reading is stale once a cash out has emptied the wallet.
+  const live = bot.liveWallet;
+  const walletBase = live ? live.base : bot.walletBase;
+  const walletQuote = live ? live.quote : bot.walletQuote;
+  const empty =
+    live != null && live.base === 0 && live.quote === 0 && live.stx < 0.01 && !bot.strayTokens.length && (bot.ownedBase ?? 0) === 0 && (bot.ownedQuote ?? 0) === 0;
+  const why = !bot.payoutAddress ? 'Set a payout address first.' : running ? 'Cash out is running.' : empty ? 'Nothing left to send.' : '';
 
   const submit = async () => {
     setBusy(true);
@@ -322,7 +328,7 @@ function CashOutCard({ bot, reload }: { bot: BotView; reload: () => Promise<void
           facts={[
             ['To', <span className="mono">{bot.payoutAddress}</span>],
             ...(bot.payoutMemo ? ([['Memo', bot.payoutMemo]] as Array<[string, string]>) : []),
-            ['In wallet', `${tok(bot.walletBase, bot.baseSymbol)} · ${tok(bot.walletQuote, bot.quoteSymbol)}`],
+            ['In wallet', `${tok(walletBase, bot.baseSymbol)} · ${tok(walletQuote, bot.quoteSymbol)}`],
             ['In pool', `${tok(bot.ownedBase, bot.baseSymbol)} · ${tok(bot.ownedQuote, bot.quoteSymbol)}`],
           ]}
           poolName={bot.pair}
@@ -342,12 +348,15 @@ function CashOutText({ text }: { text: string }) {
   const tx = text.match(/tx=(0x[0-9a-fA-F]{64})/);
   const body = text.replace(/^\[cashout\]\s*/, '');
   if (!tx) return <>{body}</>;
+  // The link takes the tx id's place in the line, so the words around it keep their spacing.
+  const [before, after] = body.split(tx[0]);
   return (
     <>
-      {body.replace(tx[0], '')}
+      {before}tx=
       <a href={explorerTx(tx[1])} target="_blank" rel="noreferrer">
         {shortAddr(tx[1])}
       </a>
+      {after}
     </>
   );
 }
