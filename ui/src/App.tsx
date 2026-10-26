@@ -20,9 +20,6 @@ export interface Shared {
   fleet: Fleet;
   reload: () => Promise<void>;
   now: number;
-  /** Whether Your bots is unfolded; one flag for the rail and Overview, remembered across visits. */
-  showBots: boolean;
-  setShowBots: (open: boolean) => void;
 }
 
 const BOTS_KEY = 'mm.showBots';
@@ -142,7 +139,7 @@ function Shell({
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [loc.pathname]);
-  const shared: Shared = { fleet, reload, now, showBots, setShowBots };
+  const shared: Shared = { fleet, reload, now };
   return (
     <div className="shell">
       <header className="topbar">
