@@ -47,6 +47,7 @@ const PATHS: Record<string, ReactNode> = {
   download: <path d="M8 2.5v7.5M4.8 7 8 10.2 11.2 7M3 12.8h10" />,
   bell: <path d="M4.2 11.2V7.4a3.8 3.8 0 0 1 7.6 0v3.8l1.2 1.3H3zM6.6 13.6a1.5 1.5 0 0 0 2.8 0" />,
   bellOff: <path d="M4.2 11.2V7.4a3.8 3.8 0 0 1 6.6-2.6M11.8 7.6v3.6l1.2 1.3H5.4M3 12.5h1M6.6 13.6a1.5 1.5 0 0 0 2.8 0M2.5 2.5l11 11" />,
+  edit: <path d="M10.8 2.7l2.5 2.5-7.6 7.6-3.2.7.7-3.2zM9.6 3.9l2.5 2.5" />,
   reset: <path d="M2.8 8a5.2 5.2 0 1 0 1.6-3.8M2.5 2.5v3h3" />,
   wallet: (
     <>
@@ -96,7 +97,7 @@ export function Status({ tone, label, title }: { tone: Tone; label: string; titl
 }
 
 export function ModeBadge({ preview, mode }: { preview: boolean; mode: 'dry_run' | 'live' }) {
-  if (preview) return <span className="badge b-preview">Preview</span>;
+  if (preview) return <span className="badge b-preview">Simulated</span>;
   if (mode === 'live') return <span className="badge b-live">Live</span>;
   return <span className="badge b-dry">Dry run</span>;
 }

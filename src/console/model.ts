@@ -153,6 +153,7 @@ export interface CurveView {
 export interface BotView {
   id: string;
   profile: string | null;
+  name: string | null;
   preview: boolean;
   pair: string;
   poolId: string;
@@ -221,6 +222,8 @@ export interface BotView {
 export interface BotRecord {
   id: string;
   profile: string | null;
+  /** The name the user gave the bot, or null for the pair's name. */
+  name?: string | null;
   preview: boolean;
   pair: string;
   poolId: string;
@@ -457,7 +460,7 @@ export const stateOf = (record: BotRecord, nowMs: number): BotState => {
   if (record.preview) {
     if (!record.running) return { tone: 'unknown', label: 'Stopped', detail: 'Stopped.' };
     if (record.paused) return { tone: 'info', label: 'Paused', detail: 'Paused.' };
-    return { tone: 'info', label: 'Running', detail: 'Running with fake funds.' };
+    return { tone: 'good', label: 'Running', detail: 'Running with simulated funds.' };
   }
   if (!record.running) {
     return {
@@ -494,7 +497,7 @@ export const needsOf = (record: BotRecord, nowMs: number): NeedItem[] => {
     id: `${record.id}:${suffix}`,
     botId: record.id,
     tone,
-    what: `${record.pair} ${what}`,
+    what: `${record.name || record.pair} ${what}`,
     detail,
   });
   if (!record.running) {
@@ -625,7 +628,7 @@ export const summaryOf = (record: BotRecord): SummaryRow[] => {
     {
       label: 'Money',
       value: record.preview
-        ? 'Fake. Preview funds, no wallet.'
+        ? 'Simulated. No wallet.'
         : record.mode === 'live'
           ? 'Real. Transactions can be sent.'
           : 'Practice. Decisions are logged, nothing is sent.',
@@ -793,6 +796,7 @@ export const toView = (record: BotRecord, sharedAddress: boolean, nowMs: number)
   return {
     id: record.id,
     profile: record.profile,
+    name: record.name || null,
     preview: record.preview,
     pair: record.pair,
     poolId: record.poolId,

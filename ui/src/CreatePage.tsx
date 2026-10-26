@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { BotView, ProfileInfo, api } from './api';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { BotView, ProfileInfo, Strategy, api } from './api';
 import type { Shared } from './App';
 import { poolName, tok } from './format';
 import { PoolList, usePoolCatalog } from './PoolList';
@@ -28,26 +28,58 @@ export function CreatePage({ fleet, reload }: Shared) {
   const [createdId, setCreatedId] = useState('');
   // Which pool of the chosen pair; empty means the server's default for that pair.
   const [contract, setContract] = useState('');
+  const [name, setName] = useState('');
+  // A strategy to start from: imported from a file, or copied from a bot (?from=<id>).
+  const [strategy, setStrategy] = useState<Strategy | null>(null);
+  const [params] = useSearchParams();
+  const from = params.get('from');
+
+  const applyStrategy = (next: Strategy, label: string) => {
+    setStrategy(next);
+    setPoolId(next.pair);
+    setName(label);
+  };
 
   useEffect(() => {
     api<{ profiles: ProfileInfo[] }>('/api/profiles')
       .then((res) => {
         setProfiles(res.profiles);
-        const free = res.profiles.find((item) => !item.taken);
-        if (free) setPoolId(free.id);
+        if (res.profiles[0]) setPoolId((current) => current || res.profiles[0].id);
       })
       .catch((err: Error) => setLoadError(err.message));
   }, []);
+
+  useEffect(() => {
+    if (!from) return;
+    api<Strategy>(`/api/bots/${encodeURIComponent(from)}/strategy`)
+      .then((res) => applyStrategy(res, `${res.name || fleet.bots.find((bot) => bot.id === from)?.pair || 'Bot'} copy`))
+      .catch((err: Error) => setLoadError(err.message));
+    // Load the source once; the fleet refreshing must not reset what the user edits.
+  }, [from]);
+
+  const importFile = async (file: File) => {
+    try {
+      const parsed = JSON.parse(await file.text()) as Partial<Strategy>;
+      if (parsed.kind !== 'bitflow-mm-strategy' || !parsed.pair || !parsed.settings) throw new Error('That file is not a Bitflow MM strategy.');
+      if (!profiles?.some((item) => item.id === parsed.pair)) throw new Error(`This app does not know the pair "${parsed.pair}".`);
+      applyStrategy(parsed as Strategy, parsed.name || '');
+      toast('good', 'Strategy loaded.');
+    } catch (err) {
+      toast('bad', err instanceof Error ? err.message : 'Could not read that file.');
+    }
+  };
 
   const pool = profiles?.find((item) => item.id === poolId) || null;
   const keyOk = /^(0x)?[0-9a-fA-F]{64}(01)?$/.test(key.trim());
   const created = fleet.bots.find((bot) => bot.id === createdId);
   const steps = stepsFor(wallet);
   const fundStep = steps.length - 1;
-  const { catalog, error: catalogError } = usePoolCatalog(pool && !pool.taken ? pool.id : null);
+  const { catalog, error: catalogError } = usePoolCatalog(pool ? pool.id : null);
   useEffect(() => {
-    setContract(catalog?.recommended || '');
-  }, [catalog]);
+    // A strategy's own pool wins when it is still usable; otherwise the recommendation.
+    const own = strategy && strategy.pair === pool?.id ? catalog?.pools.find((item) => item.poolId === strategy.poolId && item.ok) : null;
+    setContract(own ? own.poolId : catalog?.recommended || '');
+  }, [catalog, strategy]);
   const chosen = catalog?.pools.find((item) => item.poolId === contract) || null;
   const contractId = contract || pool?.poolId || '';
 
@@ -56,15 +88,17 @@ export function CreatePage({ fleet, reload }: Shared) {
     setBusy(true);
     setError('');
     try {
-      await api<{ bot: BotView }>('/api/bots', 'POST', {
+      const res = await api<{ bot: BotView }>('/api/bots', 'POST', {
         profile: pool.id,
         wallet,
         signerKey: wallet === 'import' ? key.trim().replace(/^0x/, '') : undefined,
         signerAddress: wallet === 'import' && address.trim() ? address.trim() : undefined,
         poolId: contract || undefined,
+        name: name.trim() || undefined,
+        settings: strategy && strategy.pair === pool.id ? strategy.settings : undefined,
       });
       setKey('');
-      setCreatedId(pool.id);
+      setCreatedId(res.bot.id);
       setStep(3);
       toast('good', 'Bot created.');
       await reload();
@@ -78,7 +112,6 @@ export function CreatePage({ fleet, reload }: Shared) {
   if (loadError) return <div className="page narrow"><p className="form-err">{loadError}</p></div>;
   if (!profiles) return <div className="page narrow"><span className="spinner" /></div>;
 
-  const allTaken = profiles.every((item) => item.taken) && !createdId;
 
   return (
     <div className="page narrow">
@@ -92,17 +125,32 @@ export function CreatePage({ fleet, reload }: Shared) {
         ))}
       </ol>
 
-      {allTaken ? (
-        <Card>
-          <p>Both pools already have a bot.</p>
-          <Link to="/" className="btn">
-            Back
-          </Link>
-        </Card>
-      ) : null}
-
-      {!allTaken && step === 0 ? (
-        <Card title="Pair">
+      {step === 0 ? (
+        <Card
+          title="Pair"
+          aside={
+            <label className="btn sm ghost">
+              <Icon name="download" />
+              Import strategy
+              <input
+                type="file"
+                accept="application/json,.json"
+                hidden
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void importFile(file);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+          }
+        >
+          {strategy ? (
+            <p className="note">
+              Starting from {strategy.name ? <b>{strategy.name}</b> : 'a saved strategy'}: its pool and {Object.keys(strategy.settings).length} settings. You can change
+              them after creating the bot.
+            </p>
+          ) : null}
           <div className="poolpick">
             {profiles.map((item) => {
               const body = (
@@ -112,14 +160,7 @@ export function CreatePage({ fleet, reload }: Shared) {
                   </span>
                 </>
               );
-              return item.taken ? (
-                <div key={item.id} className="poolopt taken">
-                  {body}
-                  <span className="po-taken">
-                    <Link to={`/bots/${item.id}`}>Already has a bot</Link>
-                  </span>
-                </div>
-              ) : (
+              return (
                 <button
                   key={item.id}
                   type="button"
@@ -133,7 +174,7 @@ export function CreatePage({ fleet, reload }: Shared) {
               );
             })}
           </div>
-          {pool && !pool.taken ? (
+          {pool ? (
             <div className="pickpool">
               <div className="field-l">Pool</div>
               {catalogError ? (
@@ -147,7 +188,7 @@ export function CreatePage({ fleet, reload }: Shared) {
           ) : null}
           <footer className="card-f">
             <span className="spacer" />
-            <button type="button" className="btn primary" disabled={!pool || pool.taken || (catalog != null && catalog.pools.length > 0 && !chosen)} onClick={() => setStep(1)}>
+            <button type="button" className="btn primary" disabled={!pool || (catalog != null && catalog.pools.length > 0 && !chosen)} onClick={() => setStep(1)}>
               Continue
               <Icon name="arrow" />
             </button>
@@ -155,7 +196,7 @@ export function CreatePage({ fleet, reload }: Shared) {
         </Card>
       ) : null}
 
-      {!allTaken && step === 1 && pool ? (
+      {step === 1 && pool ? (
         <Card title="Wallet">
           <Seg
             value={wallet}
@@ -207,8 +248,14 @@ export function CreatePage({ fleet, reload }: Shared) {
         </Card>
       ) : null}
 
-      {!allTaken && step === 2 && pool ? (
+      {step === 2 && pool ? (
         <Card title="Review">
+          <label className="field">
+            <span className="field-l">
+              Name <span className="muted">(optional)</span>
+            </span>
+            <input className="in" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} placeholder={pool.pair} />
+          </label>
           <dl className="facts">
             <div className="fact-row">
               <dt>Pool</dt>
@@ -219,6 +266,10 @@ export function CreatePage({ fleet, reload }: Shared) {
             <div className="fact-row">
               <dt>Wallet</dt>
               <dd>{wallet === 'create' ? 'New' : 'Imported'}</dd>
+            </div>
+            <div className="fact-row">
+              <dt>Strategy</dt>
+              <dd>{strategy && strategy.pair === pool.id ? `${strategy.name || 'Saved strategy'} (${Object.keys(strategy.settings).length} settings)` : 'Default for this pair'}</dd>
             </div>
             <div className="fact-row">
               <dt>Mode</dt>

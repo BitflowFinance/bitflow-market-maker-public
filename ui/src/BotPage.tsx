@@ -6,6 +6,7 @@ import { BinChart, ValueChart } from './charts';
 import { ago, clock, countdown, pct, poolName, price, shortAddr, stx, tok, usd } from './format';
 import { Card, CopyButton, Dot, Empty, Icon, Modal, ModeBadge, RiskConfirm, Seg, Stat, downloadFile, useToast } from './ui';
 import { KeysCard } from './KeysCard';
+import { BotTitle, StrategyCard } from './StrategyCard';
 import { PoolCard } from './PoolCard';
 import { WalletTab } from './WalletTab';
 
@@ -97,10 +98,16 @@ function Header({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
     <header className="bot-h">
       <div className="bot-h-main">
         <div className="bot-title">
-          <h1>{bot.pair}</h1>
+          <BotTitle bot={bot} reload={reload} />
         </div>
         <div className="bot-meta-clip">
         <dl className="bot-meta">
+          {bot.name ? (
+            <div>
+              <dt>Pair</dt>
+              <dd>{bot.pair}</dd>
+            </div>
+          ) : null}
           <div>
             <dt>Mode</dt>
             <dd>
@@ -793,7 +800,7 @@ function Safety({ bot }: { bot: BotView }) {
         }
       >
         {bot.preview ? (
-          <Empty icon="lock" title="Previews can’t go live">
+          <Empty icon="lock" title="Simulations can’t go live">
             A real bot shows its checklist here. <Link to="/new">Create one</Link> to see it.
           </Empty>
         ) : (
@@ -1023,6 +1030,7 @@ function Settings({ bot, reload }: { bot: BotView; reload: () => Promise<void> }
         </div>
       </Card>
       {ro ? null : <PoolCard bot={bot} reload={reload} />}
+      {ro ? null : <StrategyCard bot={bot} />}
       {ro ? null : <KeysCard bot={bot} reload={reload} />}
       <form
         className="stack"
@@ -1177,7 +1185,7 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
   };
 
   // Every action needs the same conditions, so one reason covers all three cards.
-  const shared = bot.preview ? 'Not available in previews.' : bot.mode !== 'live' ? 'Only available when live.' : bot.running && !bot.paused ? 'Pause the bot first.' : '';
+  const shared = bot.preview ? 'Not available in simulations.' : bot.mode !== 'live' ? 'Only available when live.' : bot.running && !bot.paused ? 'Pause the bot first.' : '';
 
   const submit = async () => {
     if (!open) return;
@@ -1233,7 +1241,7 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
           <Icon name={shared ? 'lock' : 'warn'} />
           <div className="grow">
             {bot.preview ? (
-              'Previews have no wallet, so there is nothing to move.'
+              'Simulations have no wallet, so there is nothing to move.'
             ) : bot.mode !== 'live' ? (
               <>
                 Manual actions move real funds, so they're off in dry run. <Link to="?tab=settings">Go live in Settings</Link> to use them.

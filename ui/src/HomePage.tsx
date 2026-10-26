@@ -10,6 +10,7 @@ export function HomePage({ fleet, now, reload }: Shared) {
   const real = fleet.bots.filter((bot) => !bot.preview);
   const previews = fleet.bots.filter((bot) => bot.preview);
   const book = fleet.book.real;
+  const [showSims, setShowSims] = useState(false);
   return (
     <div className="page">
       {real.length === 0 ? (
@@ -50,14 +51,28 @@ export function HomePage({ fleet, now, reload }: Shared) {
           </section>
         </>
       )}
-      <section className="sec">
-        <h2 className="sec-h">Previews</h2>
-        <div className="cards">
-          {previews.map((bot) => (
-            <BotCard key={bot.id} bot={bot} now={now} />
-          ))}
-        </div>
-      </section>
+      {real.length && !showSims ? (
+        <button type="button" className="btn sm ghost sims-toggle" onClick={() => setShowSims(true)}>
+          Show simulations
+        </button>
+      ) : (
+        <section className="sec">
+          <div className="sec-row">
+            <h2 className="sec-h">Simulations</h2>
+            <span className="muted">Simulated funds, to see how a bot behaves.</span>
+            {real.length ? (
+              <button type="button" className="btn sm ghost" onClick={() => setShowSims(false)}>
+                Hide
+              </button>
+            ) : null}
+          </div>
+          <div className="cards">
+            {previews.map((bot) => (
+              <BotCard key={bot.id} bot={bot} now={now} />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -74,7 +89,7 @@ function Welcome() {
             <Icon name="arrow" />
           </Link>
           <Link to="/bots/preview-sbtc" className="btn lg ghost">
-            Try a preview
+            Try a simulation
           </Link>
         </div>
       </div>
@@ -128,7 +143,7 @@ export function BotCard({ bot, now }: { bot: BotView; now: number }) {
   return (
     <Link to={`/bots/${bot.id}`} className={`bcard${bot.preview ? ' is-preview' : ''}`}>
       <div className="bcard-h">
-        <span className="bcard-pair">{bot.pair}</span>
+        <span className="bcard-pair">{bot.name || bot.pair}</span>
         {bot.preview ? null : <ModeBadge preview={false} mode={bot.mode} />}
         <span className="spacer" />
         <Status tone={bot.state.tone} label={bot.state.label} title={bot.reason?.text || bot.state.detail} />

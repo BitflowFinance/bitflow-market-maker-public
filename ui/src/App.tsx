@@ -76,7 +76,7 @@ function RailBot({ bot }: { bot: BotView }) {
     <NavLink to={`/bots/${bot.id}`} className={({ isActive }) => `rl${isActive ? ' on' : ''}`} title={bot.state.detail}>
       <Dot tone={bot.state.tone} />
       <span className="rl-main">
-        <span className="rl-t">{bot.pair}</span>
+        <span className="rl-t">{bot.name || bot.pair}</span>
         <span className="rl-s">{bot.state.label}</span>
       </span>
       {bot.preview ? null : bot.mode === 'live' ? <span className="mini live">LIVE</span> : <span className="mini">DRY</span>}
@@ -113,6 +113,7 @@ function Shell({
   const connTone = running.reduce<Tone>((worst, bot) => (RANK[bot.state.tone] > RANK[worst] ? bot.state.tone : worst), 'good');
 
   const needCount = fleet.needs.length;
+  const [showSims, setShowSims] = useState(false);
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [loc.pathname]);
@@ -170,10 +171,20 @@ function Shell({
             <span className="rl-t">New bot</span>
           </span>
         </NavLink>
-        <div className="rail-h">Previews</div>
-        {previews.map((bot) => (
-          <RailBot key={bot.id} bot={bot} />
-        ))}
+        {real.length ? (
+          // Once a real bot exists the simulations are reference, so they fold away.
+          <button type="button" className="rail-h rail-toggle" onClick={() => setShowSims(!showSims)} aria-expanded={showSims}>
+            Simulations
+            <Icon name={showSims ? 'x' : 'plus'} size={11} />
+          </button>
+        ) : (
+          <div className="rail-h">Simulations</div>
+        )}
+        {!real.length || showSims
+          ? previews.map((bot) => (
+              <RailBot key={bot.id} bot={bot} />
+            ))
+          : null}
       </nav>
       <main className="main2">
         {offline ? (

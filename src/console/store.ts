@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { checkMemo, checkPayoutAddress } from '../payout';
 import {
@@ -40,6 +40,16 @@ import { PreviewBook } from './preview';
 import { PROFILE_IDS, PROFILES, profileById } from './profiles';
 
 type Profile = NonNullable<ReturnType<typeof profileById>>;
+/**
+ * A pair's profile, as one bot uses it. `id` is the bot's own id (its env file,
+ * pid, logs, metrics and kill file all key off it); `pairId` is the pair. The
+ * first bot of a pair keeps the pair's id, so files written before bots had
+ * their own ids still resolve.
+ */
+type BotProfile = Profile & { pairId: string };
+
+const BOT_ID = /^[a-z0-9][a-z0-9-]{0,40}$/;
+const ENV_FILE = /^\.env\.([a-z0-9][a-z0-9-]{0,40})$/;
 import { createWallet, walletFromPrivateKey } from './wallet';
 
 export class HttpError extends Error {
@@ -107,9 +117,15 @@ export interface CreateInput {
   wallet: 'create' | 'import';
   /** A pool of this pair from the pool list; the profile's default when omitted. */
   poolId?: string;
+  name?: string;
+  /** Strategy settings to start from (an imported or duplicated strategy); defaults otherwise. */
+  settings?: Record<string, string>;
   signerKey?: string;
   signerAddress?: string;
 }
+
+/** The pair a bot trades: named in its env file, or implied by an id that is a pair's own. */
+const profileOfBot = (id: string, env: Record<string, string>): Profile | null => profileById(env.BOT_PROFILE || '') || profileById(id);
 
 const SECRET_KEYS = ['SIGNER_KEY', ...API_KEY_NAMES];
 
@@ -206,12 +222,13 @@ export class ConsoleStore {
       PROFILE_IDS.map((id) => PROFILES[id]),
       nowMs,
     );
-    for (const id of PROFILE_IDS) {
+    for (const id of this.botIds()) {
       const file = this.envPath(id);
       tightenSecretFile(file);
+      const env = readEnvFile(file);
+      const profile = profileOfBot(id, env);
       // The BFF v2 API dropped the short pool aliases; upgrade files written before that.
-      const poolId = readEnvFile(file).POOL_ID;
-      const upgraded = poolId ? PROFILES[id].legacyPoolIds[poolId] : undefined;
+      const upgraded = profile && env.POOL_ID ? profile.legacyPoolIds[env.POOL_ID] : undefined;
       if (upgraded) writeEnvUpdates(file, { POOL_ID: upgraded });
     }
   }
@@ -224,7 +241,7 @@ export class ConsoleStore {
     this.preview.advance(nowMs, 4000);
     const bots = await this.views(nowMs);
     const needs = bots.flatMap((bot) => bot.needs);
-    return { book: bookOf(bots), bots, needs, canCreate: PROFILE_IDS.some((id) => !existsSync(this.envPath(id))) };
+    return { book: bookOf(bots), bots, needs, canCreate: true };
   }
 
   /** Value points for the overview chart over a range, thinned to a drawable count. */
@@ -285,7 +302,7 @@ export class ConsoleStore {
         baseSymbol: profile.baseSymbol,
         quoteSymbol: profile.quoteSymbol,
         halfWidth: profile.halfWidth,
-        taken: existsSync(this.envPath(id)),
+        taken: this.botIds().some((bot) => profileOfBot(bot, readEnvFile(this.envPath(bot)))?.id === id),
         suggest: profile.suggest,
       };
     });
@@ -361,10 +378,18 @@ export class ConsoleStore {
   async create(input: CreateInput): Promise<{ bot: BotView; funding: Profile['suggest'] }> {
     const profile = profileById(input.profile);
     if (!profile) throw new HttpError(400, 'unknown_pool', 'Pick the sBTC pool or the STX pool.');
-    const envPath = this.envPath(profile.id);
-    if (existsSync(envPath)) {
-      throw new HttpError(409, 'exists', 'That pool already has a bot. Each pool needs its own wallet.');
+    const settings = input.settings || {};
+    for (const key of Object.keys(settings)) {
+      if (SETTING_KEYS.indexOf(key) < 0 || key === 'EXECUTION_MODE') throw new HttpError(400, 'unknown_setting', `A strategy cannot set ${key}.`);
     }
+    const problem = validateSettings(settings, {});
+    if (problem) throw new HttpError(400, 'invalid_setting', problem);
+    const name = cleanName(input.name || '');
+    // Each bot gets its own id, so a pair can run several (each on its own wallet).
+    const taken = new Set(this.botIds());
+    let id = profile.id;
+    for (let n = 2; taken.has(id); n += 1) id = `${profile.id}-${n}`;
+    const envPath = this.envPath(id);
     let material: { address: string; key: string };
     try {
       material =
@@ -381,22 +406,28 @@ export class ConsoleStore {
       throw new HttpError(400, 'address_mismatch', 'That key does not match the address you entered.');
     }
     const poolId = input.poolId && input.poolId !== profile.poolId ? await this.requirePairPool(profile, input.poolId) : profile.poolId;
+    const usedPorts = new Set(this.botIds().map((bot) => Number(readEnvFile(this.envPath(bot)).METRICS_HTTP_PORT || 0)));
+    let port = profile.metricsPort;
+    while (usedPorts.has(port)) port += 10;
     const text = upsertEnv(templateFor(this.root, profile), {
+      ...settings,
+      BOT_PROFILE: profile.id,
+      BOT_NAME: name,
       POOL_ID: poolId,
       EXECUTION_MODE: 'dry_run',
       SIGNER_ADDRESS: material.address,
       SIGNER_KEY: material.key,
       KEY_SOURCE: input.wallet,
       KILL_SWITCH: 'false',
-      KILL_SWITCH_FILE: `data/kill.${profile.id}`,
-      PID_FILE: `data/bot.${profile.id}.pid`,
-      METRICS_HTTP_PORT: String(profile.metricsPort),
+      KILL_SWITCH_FILE: `data/kill.${id}`,
+      PID_FILE: `data/bot.${id}.pid`,
+      METRICS_HTTP_PORT: String(port),
       LOG_PRETTY: 'true',
     });
     writeSecretFile(envPath, text);
-    this.launch(profile.id);
+    this.launch(id);
     // A failed start leaves the bot created and stopped; the error shows on its page.
-    const bot = await this.one(profile.id, Date.now());
+    const bot = await this.one(id, Date.now());
     return { bot, funding: profile.suggest };
   }
 
@@ -611,6 +642,24 @@ export class ConsoleStore {
     return job;
   }
 
+  /** Renames a bot. Only the page shows the name, so the bot keeps running. */
+  async rename(id: string, name: string): Promise<BotView> {
+    if (id.startsWith('preview-')) throw new HttpError(400, 'preview', 'Simulations cannot be renamed.');
+    const profile = this.requireProfile(id);
+    writeEnvUpdates(this.envPath(profile.id), { BOT_NAME: cleanName(name) });
+    return this.one(id, Date.now());
+  }
+
+  /** The bot's strategy, to share or import: its pair, pool and settings. Never a key or a wallet. */
+  strategy(id: string): Strategy {
+    if (id.startsWith('preview-')) throw new HttpError(400, 'preview', 'Simulations have no strategy to export.');
+    const profile = this.requireProfile(id);
+    const env = readEnvFile(this.envPath(profile.id));
+    const settings: Record<string, string> = {};
+    for (const key of SETTING_KEYS) if (key !== 'EXECUTION_MODE' && env[key]) settings[key] = env[key];
+    return { kind: 'bitflow-mm-strategy', version: 1, pair: profile.pairId, poolId: env.POOL_ID || profile.poolId, name: env.BOT_NAME || '', settings };
+  }
+
   /** Every pool of a pair, scored against the market and the curve, best first. */
   async poolCatalog(profileId: string): Promise<PoolCatalog> {
     const profile = profileById(profileId);
@@ -705,7 +754,7 @@ export class ConsoleStore {
   }
 
   private async requirePairPool(profile: Profile, poolId: string): Promise<string> {
-    const catalog = await this.poolCatalog(profile.id).catch(() => null);
+    const catalog = await this.poolCatalog((profile as BotProfile).pairId || profile.id).catch(() => null);
     const match = catalog?.pools.find((pool) => pool.poolId === poolId);
     if (!match) {
       throw new HttpError(400, 'unknown_pool', catalog?.pools.length ? `That is not a ${profile.pair} pool.` : 'Could not load the pool list to check that pool. Try again.');
@@ -775,15 +824,15 @@ export class ConsoleStore {
 
   private async realRecords(): Promise<BotRecord[]> {
     const out: BotRecord[] = [];
-    for (const id of PROFILE_IDS) {
-      const file = this.envPath(id);
-      if (!existsSync(file)) continue;
-      out.push(await this.realRecord(PROFILES[id], readEnv(readFileSync(file, 'utf8'))));
+    for (const id of this.botIds()) {
+      const env = readEnv(readFileSync(this.envPath(id), 'utf8'));
+      const profile = profileOfBot(id, env);
+      if (profile) out.push(await this.realRecord({ ...profile, id, pairId: profile.id }, env));
     }
     return out;
   }
 
-  private async realRecord(profile: Profile, env: Record<string, string>): Promise<BotRecord> {
+  private async realRecord(profile: BotProfile, env: Record<string, string>): Promise<BotRecord> {
     const pid = this.runningPid(profile.id);
     const running = pid != null;
     const port = Number(env.METRICS_HTTP_PORT || profile.metricsPort);
@@ -814,7 +863,8 @@ export class ConsoleStore {
     const logs = tailLog(join(this.root, 'data', `bot.${profile.id}.log`));
     return {
       id: profile.id,
-      profile: profile.id,
+      profile: profile.pairId,
+      name: env.BOT_NAME || null,
       preview: false,
       pair: profile.pair,
       poolId,
@@ -936,11 +986,28 @@ export class ConsoleStore {
     return insideRoot(this.root, rel);
   }
 
-  private requireProfile(id: string): Profile {
-    const profile = profileById(id);
-    if (!profile) throw new HttpError(404, 'not_found', 'No bot with that id.');
-    if (!existsSync(this.envPath(profile.id))) throw new HttpError(404, 'not_found', 'That bot has not been created.');
-    return profile;
+  private requireProfile(id: string): BotProfile {
+    if (!BOT_ID.test(id) || !existsSync(this.envPath(id))) throw new HttpError(404, 'not_found', 'No bot with that id.');
+    const profile = profileOfBot(id, readEnvFile(this.envPath(id)));
+    if (!profile) throw new HttpError(404, 'not_found', 'That bot is for a pair this app does not know.');
+    return { ...profile, id, pairId: profile.id };
+  }
+
+  /** Every bot on disk, by its env file, in pair order then creation order. */
+  private botIds(): string[] {
+    let names: string[] = [];
+    try {
+      names = readdirSync(this.root);
+    } catch {
+      return [];
+    }
+    const ids = names.map((name) => ENV_FILE.exec(name)?.[1]).filter((id): id is string => Boolean(id));
+    const rank = (id: string): number => {
+      const pair = profileOfBot(id, readEnvFile(this.envPath(id)))?.id;
+      return pair ? PROFILE_IDS.indexOf(pair) : PROFILE_IDS.length;
+    };
+    const seq = (id: string): number => Number(/-(\d+)$/.exec(id)?.[1] || 1);
+    return ids.sort((a, b) => rank(a) - rank(b) || seq(a) - seq(b) || a.localeCompare(b));
   }
 }
 
@@ -1011,6 +1078,22 @@ export const manualOutcome = (raw: string): { ok: boolean; message: string } => 
   if (sent) return { ok: true, message: sent.text.replace(/^\[\w+\]\s*/, '') };
   return lines.length ? { ok: true, message: lines[lines.length - 1].text } : { ok: false, message: 'The action did not report a result.' };
 };
+
+export interface Strategy {
+  kind: 'bitflow-mm-strategy';
+  version: 1;
+  pair: string;
+  poolId: string;
+  name: string;
+  settings: Record<string, string>;
+}
+
+/** Names live in an env file line, so keep them to one short line of printable text. */
+const cleanName = (raw: string): string =>
+  raw
+    .replace(/[\r\n"'`$\\]/g, '')
+    .trim()
+    .slice(0, 40);
 
 export const KEY_TAIL_CHARS = 4;
 export const PAYOUT_TAIL_CHARS = 4;

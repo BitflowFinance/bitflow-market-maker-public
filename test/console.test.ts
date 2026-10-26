@@ -420,6 +420,47 @@ describe('local console', () => {
     expect((await call('POST', '/api/bots/sbtc/settings', { settings: { STACKS_NODE_KEY: 'x' } })).status).toBe(400);
   });
 
+  it('runs two bots on one pair, each with its own id, files and port', async () => {
+    const { call, root } = boot();
+    const a = createWallet();
+    const b = createWallet();
+    const first = (await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: a.key })).body as { bot: { id: string } };
+    const second = (await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: b.key, name: 'Wide sBTC' })).body as { bot: { id: string; name: string; profile: string } };
+    expect(first.bot.id).toBe('sbtc');
+    expect(second.bot.id).toBe('sbtc-2');
+    expect(second.bot.name).toBe('Wide sBTC');
+    expect(second.bot.profile).toBe('sbtc');
+    const envA = readFileSync(join(root, '.env.sbtc'), 'utf8');
+    const envB = readFileSync(join(root, '.env.sbtc-2'), 'utf8');
+    expect(envB).toContain('BOT_PROFILE=sbtc');
+    expect(envB).toContain('PID_FILE=data/bot.sbtc-2.pid');
+    expect(envA.match(/METRICS_HTTP_PORT=(\d+)/)?.[1]).not.toBe(envB.match(/METRICS_HTTP_PORT=(\d+)/)?.[1]);
+    const fleet = (await call('GET', '/api/fleet')).body as { bots: Array<{ id: string }> };
+    expect(fleet.bots.filter((bot) => !bot.id.startsWith('preview-')).map((bot) => bot.id)).toEqual(['sbtc', 'sbtc-2']);
+    expect((await call('POST', '/api/bots/sbtc-2/name', { name: 'Tight sBTC' })).status).toBe(200);
+    expect(((await call('GET', '/api/bots/sbtc-2')).body as { name: string }).name).toBe('Tight sBTC');
+  });
+
+  it('exports a strategy without keys and starts a new bot from it', async () => {
+    const { call, root } = boot();
+    const a = createWallet();
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: a.key, name: 'Mine' });
+    await call('POST', '/api/bots/stx/settings', { settings: { CURVE_HALF_WIDTH_BINS: '9', F_STAR: '0.4' } });
+    const strategy = (await call('GET', '/api/bots/stx/strategy')).body as { kind: string; pair: string; settings: Record<string, string> };
+    expect(strategy.kind).toBe('bitflow-mm-strategy');
+    expect(strategy.pair).toBe('stx');
+    expect(strategy.settings.CURVE_HALF_WIDTH_BINS).toBe('9');
+    expect(JSON.stringify(strategy)).not.toContain(a.key);
+    expect(JSON.stringify(strategy)).not.toContain('EXECUTION_MODE');
+
+    const copy = (await call('POST', '/api/bots', { profile: 'stx', wallet: 'create', settings: strategy.settings, name: 'Mine copy' })).body as { bot: { id: string } };
+    const env = readFileSync(join(root, `.env.${copy.bot.id}`), 'utf8');
+    expect(env).toMatch(/^CURVE_HALF_WIDTH_BINS=9$/m);
+    expect(env).toMatch(/^EXECUTION_MODE=dry_run$/m);
+    expect((await call('POST', '/api/bots', { profile: 'stx', wallet: 'create', settings: { EXECUTION_MODE: 'live' } })).status).toBe(400);
+    expect((await call('POST', '/api/bots', { profile: 'stx', wallet: 'create', settings: { F_STAR: '2' } })).status).toBe(400);
+  });
+
   it('does not start a stopped bot when its settings are saved', async () => {
     const { call, host } = boot();
     await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: createWallet().key });

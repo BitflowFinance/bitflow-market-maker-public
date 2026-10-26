@@ -365,7 +365,7 @@ export function WalletTab({ bot, reload }: { bot: BotView; reload: () => Promise
   if (bot.preview) {
     return (
       <Card>
-        <Empty icon="wallet" title="Previews have no wallet">
+        <Empty icon="wallet" title="Simulations have no wallet">
           A real bot shows its balances, key backup, and cash out here. <Link to="/new">Create one</Link> to see it.
         </Empty>
       </Card>

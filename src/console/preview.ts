@@ -93,7 +93,7 @@ export class PreviewBook {
   stop(id: string): void {
     const state = this.require(id);
     state.running = false;
-    this.log(state, new Date().toISOString(), 'info', 'Stopped. Fake funds stay where they were.');
+    this.log(state, new Date().toISOString(), 'info', 'Stopped. Simulated funds stay where they were.');
   }
 
   record(id: string): BotRecord {

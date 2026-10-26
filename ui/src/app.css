@@ -71,8 +71,13 @@ html, body { margin: 0; }
 .nx .rail-note { text-transform: none; letter-spacing: 0; font-weight: 500; }
 .nx .rail-empty { color: var(--faint); padding: 4px 10px 6px; font-size: 12.5px; }
 .nx .rl { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; color: var(--ink-2); min-height: 34px; }
-.nx .rl:hover { background: var(--hover); color: var(--ink); text-decoration: none; }
-.nx .rl.on { background: var(--sel); color: var(--ink); }
+/* Tinted from the text colour, so hover and selection show on both the light and dark rail. */
+.nx .rl:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); text-decoration: none; }
+.nx .rl.on { background: color-mix(in srgb, var(--ink) 11%, transparent); color: var(--ink); }
+.nx .rail-toggle { font: inherit; font-size: 11px; background: none; border: 0; cursor: pointer; width: 100%; justify-content: space-between; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); font-weight: 600; padding: 16px 10px 6px; }
+.nx .rail-toggle:hover { color: var(--ink-2); }
+.nx .sims-toggle { justify-self: start; }
+.nx .btnrow { display: inline-flex; gap: 8px; flex: none; }
 .nx .rl-main { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.25; }
 .nx .rl-t { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nx .rl-s { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -93,8 +98,10 @@ html, body { margin: 0; }
 /* dots, status, badges, tags */
 .nx .dot2 { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; background: var(--faint); }
 .nx .dot2.t-good { background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent); }
-.nx .dot2.t-info { background: var(--accent); }
-.nx .dot2.t-warn { background: var(--warn); }
+/* Every state gets the same soft ring, so colour alone tells them apart. */
+.nx .dot2.t-info { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+.nx .dot2.t-warn { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 25%, transparent); }
+.nx .dot2.t-unknown { box-shadow: 0 0 0 3px color-mix(in srgb, var(--faint) 25%, transparent); }
 .nx .dot2.t-serious { background: var(--serious); box-shadow: 0 0 0 3px color-mix(in srgb, var(--serious) 25%, transparent); }
 .nx .status { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 550; color: var(--ink-2); white-space: nowrap; }
 .nx .badge { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; line-height: 1.5; padding: 0 6px; border-radius: 4px; white-space: nowrap; border: 1px solid transparent; }

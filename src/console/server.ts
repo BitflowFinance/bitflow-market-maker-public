@@ -101,6 +101,9 @@ export const handleConsole = async (store: ConsoleStore, req: ConsoleRequest, no
   if (method === 'GET' && path === '/api/profiles') {
     return { status: 200, body: { profiles: store.profiles() } };
   }
+  if (method === 'GET' && botAction && botAction[2] === 'strategy') {
+    return { status: 200, body: store.strategy(decodeURIComponent(botAction[1])) };
+  }
   if (method === 'GET' && botAction && botAction[2] === 'history') {
     const asked = (req.query || {}).range;
     const range = asked === '7d' || asked === 'all' ? asked : '1d';
@@ -129,6 +132,11 @@ export const handleConsole = async (store: ConsoleStore, req: ConsoleRequest, no
         signerKey: typeof body.signerKey === 'string' ? body.signerKey : undefined,
         signerAddress: typeof body.signerAddress === 'string' ? body.signerAddress : undefined,
         poolId: typeof body.poolId === 'string' ? body.poolId : undefined,
+        name: typeof body.name === 'string' ? body.name : undefined,
+        settings:
+          body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings)
+            ? Object.fromEntries(Object.entries(body.settings as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
+            : undefined,
       }),
     };
   }
@@ -149,6 +157,7 @@ export const handleConsole = async (store: ConsoleStore, req: ConsoleRequest, no
         }),
       };
     }
+    if (action === 'name') return { status: 200, body: await store.rename(id, typeof body.name === 'string' ? body.name : '') };
     if (action === 'baseline-reset') return { status: 200, body: await store.resetBaseline(id) };
     if (action === 'key-backup') {
       requirePage(req);

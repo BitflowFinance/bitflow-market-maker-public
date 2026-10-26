@@ -68,6 +68,7 @@ export type HistoryRange = '1d' | '7d' | 'all';
 export interface BotView {
   id: string;
   profile: string | null;
+  name: string | null;
   preview: boolean;
   pair: string;
   poolId: string;
@@ -128,6 +129,15 @@ export interface BotView {
   liveWallet: { base: number; quote: number; stx: number; asOf: string } | null;
   keysSet: Record<string, boolean>;
   readFailures: { count: number; max: number } | null;
+}
+
+export interface Strategy {
+  kind: 'bitflow-mm-strategy';
+  version: 1;
+  pair: string;
+  poolId: string;
+  name: string;
+  settings: Record<string, string>;
 }
 
 export interface PoolOption {
