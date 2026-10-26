@@ -341,6 +341,7 @@ describe('local console', () => {
     expect(humanReason('reposition: drift 7 bins; rebuild curve on active bin 512', 'rebalance').kind).toBe('rebuild');
     expect(humanReason('nonce gap detected (missing [4]); holding until cleared', 'hold').kind).toBe('stuck');
     expect(humanReason('kill_switch', 'frozen').kind).toBe('paused');
+    expect(humanReason('snapshot_fetch_failed: wallet balance read failed token=SP1.usdcx: 429', 'frozen').text).toContain('wallet balance');
   });
 
   it('reads pretty and JSON log lines', () => {

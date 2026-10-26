@@ -408,10 +408,13 @@ export const getPoolSnapshot = async (
   // breaker see it instead.
   const userBins = address ? await fetchUserBins(poolId, address) : [];
 
-  const [walletX, walletY] = await Promise.all([
-    getFtBalance(tokenX.contract, address).catch(() => BigInt(0)),
-    getFtBalance(tokenY.contract, address).catch(() => BigInt(0)),
-  ]);
+  // A failed read must not become a zero balance: the bot would then see an empty
+  // wallet and hold for "low gas", or size a plan off funds it believes are gone.
+  const readBalance = (contract: string): Promise<bigint> =>
+    getFtBalance(contract, address).catch((err: Error) => {
+      throw new Error(`wallet balance read failed token=${contract}: ${err.message}`);
+    });
+  const [walletX, walletY] = await Promise.all([readBalance(tokenX.contract), readBalance(tokenY.contract)]);
 
   // Owned reserves are our share of each bin: the user-positions endpoint only
   // returns our share count, so join with pool bins for totals + reserves.

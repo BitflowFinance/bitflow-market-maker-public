@@ -262,6 +262,9 @@ export const humanReason = (reason: string | undefined | null, decision: string 
   if (r.startsWith('kill_switch')) return { kind: 'paused', text: 'Paused.' };
   if (r.startsWith('pool_inactive')) return { kind: 'pool', text: 'The pool is paused on Bitflow. Waiting.' };
   if (r.startsWith('peg_unavailable')) return { kind: 'data', text: 'Couldn’t read the market price. Waiting.' };
+  if (r.startsWith('snapshot_fetch_failed') && r.includes('wallet balance read failed')) {
+    return { kind: 'data', text: 'Couldn’t read the wallet balance. Waiting.' };
+  }
   if (r.startsWith('snapshot_fetch_failed')) return { kind: 'data', text: 'Couldn’t read the pool. Waiting.' };
   if (r.startsWith('stale_tip') || r.includes('tip_lag')) {
     return { kind: 'data', text: 'Pool data is out of date. Waiting.' };

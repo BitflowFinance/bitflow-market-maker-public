@@ -39,7 +39,10 @@ const route = (overrides: Record<string, unknown> = {}) =>
     if (url.includes('/quotes/v2/bins/')) return ok(fixtures.v2.bins);
     if (url.includes('/current-bins')) return ok(fixtures.v2.currentBins);
     if (url.includes('/positions/')) return ok(fixtures.v1.positions);
-    // Anything else (app pool, FT balances) is tolerated by the caller.
+    // Token balances are read-only contract calls; answer (ok u0) so a balance
+    // read succeeds, since a failed one now fails the snapshot.
+    if (url.includes('/call-read/')) return ok({ okay: true, result: `0x0701${'00'.repeat(16)}` });
+    // Anything else (app pool) is tolerated by the caller.
     return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) };
   });
 
