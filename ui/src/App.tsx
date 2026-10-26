@@ -151,12 +151,12 @@ function Shell({
         ) : null}
         <NotifyButton on={notify} setOn={setNotify} />
         <button type="button" className="ibtn" onClick={toggle} aria-label={mode === 'dark' ? 'Use light theme' : 'Use dark theme'} title="Theme">
-          <Icon name={mode === 'dark' ? 'sun' : 'moon'} />
+          <Icon name={mode === 'dark' ? 'sun' : 'moon'} size={16} />
         </button>
       </header>
       <nav className="rail2" aria-label="Main">
         <NavLink to="/" end className={({ isActive }) => `rl rl-top${isActive ? ' on' : ''}`}>
-          <Icon name="home" />
+          <Icon name="home" size={16} />
           <span className="rl-main">
             <span className="rl-t">Overview</span>
           </span>
@@ -165,7 +165,7 @@ function Shell({
         <div className="rail-h">Your bots</div>
         {real.length ? real.map((bot) => <RailBot key={bot.id} bot={bot} />) : <div className="rail-empty">None yet</div>}
         <NavLink to="/new" className={({ isActive }) => `rl rl-top${isActive ? ' on' : ''}`}>
-          <Icon name="plus" />
+          <Icon name="plus" size={16} />
           <span className="rl-main">
             <span className="rl-t">New bot</span>
           </span>
