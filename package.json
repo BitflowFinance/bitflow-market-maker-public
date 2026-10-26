@@ -14,13 +14,15 @@
     "curve": "tsx scripts/curve-view.ts",
     "fees": "tsx scripts/fee-report.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "ui": "tsx src/console/main.ts"
   },
   "dependencies": {
     "@stacks/network": "^6.16.0",
     "@stacks/transactions": "^6.17.0",
     "dotenv": "^17.2.3",
     "pino": "^9.14.0",
+    "sbtc": "^0.3.2",
     "stacks-tx-v7": "npm:@stacks/transactions@^7.5.0"
   },
   "devDependencies": {

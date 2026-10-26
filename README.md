@@ -6,10 +6,60 @@ A TypeScript market maker for **Bitflow DLMM** pools on Stacks. This public edit
 
 | Pair | Profile | Pool | Strategy |
 | --- | --- | --- | --- |
-| sBTC / USDCx | `--pool sbtc` | `dlmm_1` | `sbtc-usdcx-curve` |
-| STX / USDCx | `--pool stx` | `dlmm_14` | `stx-usdcx-curve` |
+| sBTC / USDCx | `--pool sbtc` | `…dlmm-pool-sbtc-usdcx-v-1-bps-10` | `sbtc-usdcx-curve` |
+| STX / USDCx | `--pool stx` | `…dlmm-pool-stx-usdcx-v-1-bps-10` | `stx-usdcx-curve` |
+
+`POOL_ID` is the pool's full contract id (deployer `SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD`); the example env files have it. Older files with `dlmm_1` / `dlmm_3` / `dlmm_14` still work: the bot looks the contract id up at startup and logs a warning.
+
+**Choosing a pool.** Each pair has several pools covering different price ranges. The page ranks them: a pool must have the curve's bin size, the market price inside its range with room to spare, and a pool price within the halt limit of the market; the deepest of those near the price is recommended. "Change pool" on the Settings tab moves a bot, and "Needs you" warns when the price nears the edge of a bot's pool.
+
+The STX profile used to point at `dlmm_14` (`…stx-usdcx-v-2-bps-10`), a pool with almost no liquidity. New STX bots now use the main pool (`…stx-usdcx-v-1-bps-10`, formerly `dlmm_3`). An existing `.env.stx` keeps the pool it names, because it may hold liquidity there. To move it: pause, withdraw everything, set `POOL_ID` to the new contract id, then resume.
 
 One process per pool (own wallet, own nonce space). Each process loads `.env.<name>` when you pass `--pool <name>`.
+
+## Local page
+
+A local page watches and controls the bots on this computer. It does not send the private key to the browser.
+
+```bash
+npm install
+npm run ui
+```
+
+Then open http://127.0.0.1:5191. Or ask your coding agent to "set up this repo and start the app"; [AGENTS.md](./AGENTS.md) has the steps.
+
+Preview bots are on the first screen. They have no wallet and the balances are fake. Create a real bot in the page. It always starts in dry run.
+
+There is no login. The helper listens on `127.0.0.1` only and refuses requests from other websites or hostnames.
+
+An agent uses the same helper: send JSON (`content-type: application/json`) to `http://127.0.0.1:4173`. Risky calls stay risky: dry run refuses manual trades, a withdraw must be paused first, and leaving dry run requires `confirmLive` plus the exact pool name.
+
+| Call | What it does |
+| --- | --- |
+| `GET /api/fleet` | All bots, the book, and “Needs you” |
+| `GET /api/bots/:id` | One bot, including logs, bins, limits, and settings |
+| `GET /api/pools?profile=stx` | Every pool of the pair, best first: range, price, market gap, liquidity near the price, and why a pool is skipped |
+| `POST /api/bots` | Create a bot. Body: `profile` (`sbtc` or `stx`), `wallet` (`create` or `import`), `signerKey` only when importing, and optionally `poolId` from the pool list. The response never contains the key. |
+| `POST /api/bots/:id/pool` | Change pools: pause, withdraw everything (live), confirm the old pool is empty, switch, stay paused. Body `poolId`, `acknowledged: true`, `poolName`. |
+| `GET /api/bots/:id/history?range=1d` | Value points for the chart (`1d`, `7d`, or `all`), thinned to about 300 |
+| `GET /api/bots/:id/decisions.csv` | Every recorded check as CSV |
+| `POST /api/bots/:id/pause` | Kill switch. Process stays up. Liquidity stays in the pool. |
+| `POST /api/bots/:id/resume` | Clear the kill switch |
+| `POST /api/bots/:id/start` | Start the process |
+| `POST /api/bots/:id/stop` | Stop the process. Does not withdraw |
+| `POST /api/bots/:id/settings` | Save settings and restart. Body `settings`. Going live also needs `confirmLive: true` and `poolName`. |
+| `POST /api/bots/:id/baseline-reset` | Reset the profit starting point on the next valued check |
+| `POST /api/bots/:id/manual` | Swap, add, or withdraw. Live only. Body includes `acknowledged: true` and `poolName`. |
+| `POST /api/bots/:id/cash-out` | Pause and stop the bot, withdraw everything, and send all tokens and STX to the saved payout address. Works in dry run. Body `acknowledged: true` and `poolName`. |
+| `GET /api/bots/:id/cash-out` | Progress of the last cash out (`running`, `done`, or `failed`) with its steps and tx ids |
+
+**Keep `npm run ui` running.** Bots started from the page stop when it stops: closing its terminal, restarting the computer, or letting it sleep all stop a live bot. Liquidity stays in the pool while it is stopped.
+
+**Back up a new wallet.** A wallet the page creates exists only in `.env.<pool>` (readable only by your user). The create steps show the key once and ask you to save it; the Wallet tab can show it again. Going live is blocked until it is backed up. Imported keys skip this.
+
+**Cash out** goes only to a payout address you save on the Wallet tab. Saving or changing that address and showing the key work only in the page, not through the API, so an agent can cash out but cannot send funds anywhere else. If a cash out stops partway, run it again: each step reads live balances and finishes what is left. Bridging back to BTC or USDC is not built yet. From the command line: `npm run tick -- --pool sbtc --cash-out --to SP… [--memo …]`.
+
+Bridging (BTC → sBTC) is built but turned off for now. Default ports are `5191` for the page and `4173` for the API (`CONSOLE_PAGE_PORT`, `CONSOLE_API_PORT`).
 
 ## The curve (peaked at the active bin)
 

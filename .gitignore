@@ -11,3 +11,5 @@ coverage/
 .idea/
 .vscode/
 data/
+ui/node_modules/
+ui/dist/

@@ -1,6 +1,9 @@
+import { mkdtempSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { CONFIG } from '../src/config';
-import { classifyReason, getHistory, getMetrics, recordTick } from '../src/metrics';
+import { classifyReason, getHistory, getMetrics, recordTick, resetBaseline } from '../src/metrics';
 import { TickResult } from '../src/mm';
 
 // Keep tests in-memory: never touch the real data/ files (the defaults), which a
@@ -118,5 +121,101 @@ describe('recordTick portfolio + PnL', () => {
     expect(byDecision.rebalance).toBeGreaterThanOrEqual(1);
     expect((m.executedSteps as number)).toBeGreaterThanOrEqual(2);
     expect(getHistory(10).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('carries the last balances when a tick has no position read', () => {
+    recordTick(
+      tick({
+        tickId: 20,
+        walletQuote: stx(40),
+        walletBase: stx(10),
+        ownedQuote: stx(5),
+        ownedBase: stx(2),
+        quotePerBase: 2,
+        activeBinId: 480,
+        activeBinPrice: 2,
+        ownedBinIds: [478, 480, 482],
+      }),
+    );
+    recordTick(
+      tick({
+        tickId: 21,
+        decision: 'frozen',
+        reason: 'kill_switch',
+        activeBinId: -1,
+        activeBinPrice: 0,
+        quotePerBase: null,
+      }),
+    );
+    const recent = getHistory(2);
+    const prior = recent[0];
+    const last = recent[1];
+    expect(last.holdingsCarried).toBe(true);
+    expect(last.walletQuote).toBeCloseTo(40, 4);
+    expect(last.ownedBase).toBeCloseTo(2, 4);
+    expect(last.activeBinId).toBe(480);
+    expect(last.activeBinPrice).toBe(2);
+    expect(last.ownedBinIds).toEqual([478, 480, 482]);
+    expect(last.holdingsAsOf).toBe(prior.t);
+    expect(last.portfolioValue).not.toBeNull();
+  });
+
+  it('labels a de-risk plan apart from a curve rebuild', () => {
+    recordTick(
+      tick({
+        tickId: 22,
+        decision: 'rebalance',
+        executed: true,
+        walletQuote: stx(40),
+        walletBase: stx(10),
+        plan: {
+          poolId: 'dlmm_10',
+          type: 'derisk',
+          reason: 'de-risk',
+          targetBinId: 480,
+          steps: [{}] as never,
+          notes: [],
+          inventoryBlocked: false,
+          inventoryRebalanceOnly: false,
+        },
+        txIds: ['abcd'],
+      }),
+    );
+    const last = getHistory(1)[0];
+    expect(last.planType).toBe('derisk');
+    expect(last.txIds).toEqual(['abcd']);
+    const byPlanType = getMetrics().byPlanType as Record<string, number>;
+    expect(byPlanType.derisk).toBeGreaterThanOrEqual(1);
+  });
+
+  it('re-baselines on the next valued tick when the reset file is present', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mm-baseline-'));
+    const previous = CONFIG.METRICS_BASELINE_FILE;
+    CONFIG.METRICS_BASELINE_FILE = join(dir, 'baseline.json');
+    resetBaseline();
+    recordTick(
+      tick({
+        tickId: 30,
+        walletQuote: stx(80),
+        walletBase: stx(0),
+        ownedQuote: stx(0),
+        ownedBase: stx(0),
+        quotePerBase: 1,
+      }),
+    );
+    writeFileSync(`${CONFIG.METRICS_BASELINE_FILE}.reset`, '');
+    recordTick(
+      tick({
+        tickId: 31,
+        walletQuote: stx(20),
+        walletBase: stx(0),
+        ownedQuote: stx(0),
+        ownedBase: stx(0),
+        quotePerBase: 1,
+      }),
+    );
+    const baseline = getMetrics().baseline as { quote: number };
+    expect(baseline.quote).toBeCloseTo(20, 4);
+    CONFIG.METRICS_BASELINE_FILE = previous;
   });
 });

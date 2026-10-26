@@ -72,7 +72,7 @@ export type PlanStep = WithdrawLiquidityStep | SwapStep | AddLiquidityStep | Add
 
 export interface RebalancePlan {
   poolId: string;
-  type: 'reposition' | 'within_bin';
+  type: 'reposition' | 'within_bin' | 'derisk';
   reason: string;
   targetBinId: number;
   steps: PlanStep[];

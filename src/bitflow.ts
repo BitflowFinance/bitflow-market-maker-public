@@ -1,6 +1,7 @@
 import { CONFIG } from './config';
 import { fetchJson, fetchJsonAllowMissing, getFtBalance } from './stacks';
 import { logDebug, logWarn } from './logger';
+import { getNonceInfo } from './wallet';
 
 export const BIN_CENTER = 500;
 export const PRICE_SCALE = 1e8;
@@ -214,6 +215,16 @@ export const checkEngineTip = async (): Promise<TipCheck> => {
   return { fresh: true, reason: `tip_lag=${s.tip_lag}` };
 };
 
+// v2 routes key off the pool contract id. The short aliases (dlmm_1) that older
+// env files carry now 404 on the quote routes, so resolve one once at startup.
+export const resolvePoolId = async (poolId: string): Promise<string> => {
+  if (!poolId || poolId.includes('.') || apiVersion() !== 'v2') return poolId;
+  const pool = await fetchJson<{ poolContract?: string; poolId?: string }>(`${base()}/app/v2/pools/${poolId}`, CONFIG.BFF_API_KEY);
+  const contract = pool.poolContract || pool.poolId || '';
+  if (!contract.includes('.')) throw new Error(`could not resolve pool "${poolId}" to a contract id`);
+  return contract;
+};
+
 export const fetchPoolBins = async (poolId: string): Promise<PoolBinsResponse> => {
   const v = apiVersion();
   const res = await fetchJson<PoolBinsResponse>(
@@ -221,6 +232,11 @@ export const fetchPoolBins = async (poolId: string): Promise<PoolBinsResponse> =
     CONFIG.BFF_API_KEY,
   );
   if (v === 'v1') return res;
+  // An unknown pool is HTTP 200 with success: false and no bins. Read as data it
+  // would look like an empty pool, so it has to fail like any other bad read.
+  if (res.success === false) {
+    throw new Error(`pool bins unavailable pool="${poolId}" error="${(res as { error?: string }).error || 'unknown'}"`);
+  }
   return {
     ...res,
     bins: (res.bins || []).map((b) => ({ ...b, bin_id: unsignedBinId(Number(b.bin_id)) })),
@@ -250,17 +266,42 @@ interface CurrentBinsResponse {
   errorCode?: string;
 }
 
+// A wallet that has never sent a transaction cannot have added liquidity, so
+// "no position registered" is safe to read as an empty book for it -- and only
+// for it. Every new bot wallet is in this state on its first tick.
+const walletHasNeverSent = async (address: string): Promise<boolean> => {
+  try {
+    const nonces = await getNonceInfo(address);
+    return nonces.nextNonce === 0 && !nonces.mempoolPending;
+  } catch {
+    return false;
+  }
+};
+
+const readCurrentBins = async (url: string, address: string): Promise<CurrentBinsResponse | null> => {
+  try {
+    return await fetchJson<CurrentBinsResponse>(url, CONFIG.BFF_API_KEY);
+  } catch (err) {
+    if (!(err as Error).message.startsWith('503')) throw err;
+    // v2 answers 503 NODE_POSITION_NOT_REGISTERED, not an empty list, for a
+    // wallet the engine has never seen in this pool. fetchJson drops the body,
+    // so read the code once more before deciding.
+    const res = await fetch(url, { headers: CONFIG.BFF_API_KEY ? { 'X-API-Key': CONFIG.BFF_API_KEY } : {} });
+    const body = (await res.json().catch(() => ({}))) as CurrentBinsResponse;
+    if (body.errorCode === 'NODE_POSITION_NOT_REGISTERED' && (await walletHasNeverSent(address))) return null;
+    throw new Error(`${(err as Error).message} code="${body.errorCode || ''}"`);
+  }
+};
+
 const fetchUserBinsV2 = async (poolId: string, address: string): Promise<UserBin[]> => {
   const url = `${base()}/app/v2/users/${address}/positions/${poolId}/current-bins`;
-  const res = await fetchJson<CurrentBinsResponse>(url, CONFIG.BFF_API_KEY);
-  // This endpoint keys off the pool alias and 404s on a contract principal --
-  // the reverse of the other app/v2 routes -- so say so rather than reporting it
-  // as a dirty snapshot.
+  const res = await readCurrentBins(url, address);
+  if (!res) {
+    logDebug('[bitflow] no user bins: this wallet has never sent a transaction');
+    return [];
+  }
   if (res.errorCode === 'POOL_NOT_FOUND') {
-    throw new Error(
-      `pool "${poolId}" not found in the v2 MM inventory cohort; POOL_ID must be the ` +
-        'BFF alias (e.g. dlmm_1), not the pool contract principal',
-    );
+    throw new Error(`pool "${poolId}" not found in the v2 MM inventory; check POOL_ID is the pool contract id`);
   }
   // An empty book is only ever reported as clean+complete with bins: []. A dirty
   // or tip-lagging snapshot must never be read as "no inventory" -- that would
@@ -323,9 +364,8 @@ export const getPoolSnapshot = async (
   poolId: string,
   address: string,
 ): Promise<PoolSnapshot> => {
-  // app/v2 rejects the short aliases (dlmm_1) and only answers to the contract
-  // principal, and it carries nothing the quotes pool doesn't already give us
-  // here, so v2 skips the call entirely rather than resolving the alias twice.
+  // On v2 the app pool carries nothing the quotes pool doesn't already give us
+  // here, so it is skipped.
   const [quotesPool, appPool, binsRes] = await Promise.all([
     fetchQuotesPool(poolId),
     apiVersion() === 'v2'
