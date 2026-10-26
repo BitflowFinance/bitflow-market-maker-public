@@ -1175,7 +1175,7 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
   };
 
   // Every action needs the same conditions, so one reason covers all three cards.
-  const shared = bot.preview ? 'Not available in previews.' : bot.mode !== 'live' ? 'Only available when live.' : !bot.paused ? 'Pause the bot first.' : '';
+  const shared = bot.preview ? 'Not available in previews.' : bot.mode !== 'live' ? 'Only available when live.' : bot.running && !bot.paused ? 'Pause the bot first.' : '';
 
   const submit = async () => {
     if (!open) return;
@@ -1217,8 +1217,8 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
 
   return (
     <div className="stack">
-      {!bot.preview && bot.mode === 'live' && !bot.paused ? (
-        <div className="banner2 warn">
+      {!bot.preview && bot.mode === 'live' && bot.running && !bot.paused ? (
+        <div className="banner2 warn center">
           <Icon name="pause" />
           <div className="grow">Pause the bot first, so its next check doesn't undo a manual action. Liquidity stays in the pool while it's paused.</div>
           <button type="button" className="btn sm" disabled={pausing} onClick={() => void pause()}>
@@ -1237,7 +1237,7 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
                 Manual actions move real funds, so they're off in dry run. <Link to="?tab=settings">Go live in Settings</Link> to use them.
               </>
             ) : (
-              'The bot is paused. These send a transaction from the bot wallet right away.'
+              `The bot is ${bot.running ? 'paused' : 'stopped'}. These send a transaction from the bot wallet right away.`
             )}
           </div>
         </div>

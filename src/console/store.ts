@@ -473,8 +473,9 @@ export class ConsoleStore {
       );
     }
     // A running loop and a manual transaction would race for the same nonce, and
-    // the loop's next check would undo the trade anyway; pausing settles both.
-    if (!this.isPaused(env)) {
+    // the loop's next check would undo the trade anyway; pausing settles both. A
+    // stopped bot has no loop to race.
+    if (!this.isPaused(env) && this.runningPid(profile.id) != null) {
       throw new HttpError(
         409,
         'pause_first',

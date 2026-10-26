@@ -180,6 +180,8 @@ html, body { margin: 0; }
 .nx .banner2 .btn { margin: -4px 0; flex: none; }
 .nx .banner2 .btn .ico { margin-top: 0; }
 .nx .banner2 > .ico { flex: none; }
+.nx .banner2.center { align-items: center; }
+.nx .banner2.center > .ico { margin-top: 0; }
 .nx .banner2.info { background: var(--info-bg); border-color: var(--info-line); }
 .nx .banner2.info .ico { color: var(--accent); }
 .nx .banner2.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-ink); }

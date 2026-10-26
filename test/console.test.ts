@@ -213,6 +213,10 @@ describe('local console', () => {
       expect((early.body as { error: string }).error).toBe('pause_first');
     }
 
+    // A stopped bot has no loop to race, so it needs no pause.
+    await call('POST', '/api/bots/sbtc/stop');
+    expect((await call('POST', '/api/bots/sbtc/manual', { action: 'swap', side: 'quote', amount: '1', acknowledged: true, poolName: 'sBTC / USDCx' })).status).toBe(200);
+    await call('POST', '/api/bots/sbtc/start');
     await call('POST', '/api/bots/sbtc/pause');
     const sent = await call('POST', '/api/bots/sbtc/manual', {
       action: 'withdraw',
@@ -221,7 +225,7 @@ describe('local console', () => {
       poolName: 'sBTC / USDCx',
     });
     expect(sent.status).toBe(200);
-    expect(host.manual[0]).toEqual(['--withdraw-liquidity', '--pct', '100']);
+    expect(host.manual[host.manual.length - 1]).toEqual(['--withdraw-liquidity', '--pct', '100']);
   });
 
   it('asks before leaving dry run, then restarts', async () => {
