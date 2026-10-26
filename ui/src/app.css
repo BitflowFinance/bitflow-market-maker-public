@@ -149,7 +149,7 @@ html, body { margin: 0; }
 .nx .in-unit .in:only-child { border-radius: 8px; }
 .nx .sf-h { font-size: 12px; color: var(--muted); line-height: 1.45; }
 .nx .sf-h.bad { color: var(--serious-ink); }
-.nx .form-err { color: var(--serious-ink); background: var(--serious-bg); padding: 8px 10px; border-radius: 8px; font-size: 12.5px; }
+.nx .form-err { color: var(--serious-ink); background: var(--serious-bg); padding: 8px 10px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--serious) 40%, transparent); font-size: 12.5px; }
 .nx .check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
 .nx .check input { margin-top: 2px; accent-color: var(--accent); }
 

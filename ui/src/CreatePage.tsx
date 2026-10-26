@@ -256,17 +256,23 @@ export function CreatePage({ fleet, reload }: Shared) {
             value={wallet}
             onChange={setWallet}
             options={[
-              { value: 'create', label: 'New wallet' },
+              { value: 'create', label: walletInfo?.hasPhrase ? 'App wallet' : 'New wallet' },
               { value: 'phrase', label: 'Recovery phrase' },
               { value: 'import', label: 'Private key' },
             ]}
           />
           {wallet === 'create' ? (
             walletInfo?.hasPhrase ? (
-              <p className="muted">
-                Uses this app's recovery phrase, account {walletInfo.nextAccount + 1}: a wallet of its own that the same phrase restores.
-                {walletInfo.backedUp ? ' You already saved the phrase, so there is nothing new to back up.' : ' The next steps show the phrase so you can save a copy.'}
-              </p>
+              <div className="banner2 info center">
+                <Icon name="wallet" />
+                <div className="grow">
+                  <b>Uses the wallet this app already made, account {walletInfo.nextAccount + 1}</b>
+                  <div className="muted">
+                    Same recovery phrase as your other bots, but its own account and address, so the bots never share funds.
+                    {walletInfo.backedUp ? ' You already saved the phrase, so there is nothing new to back up.' : ' The next steps show the phrase so you can save a copy.'}
+                  </div>
+                </div>
+              </div>
             ) : (
               <p className="muted">
                 The app makes a recovery phrase, saved in <code>.mm-wallet</code> on this computer. This bot gets account 1; later bots get accounts 2, 3 and on, so one
@@ -385,7 +391,7 @@ export function CreatePage({ fleet, reload }: Shared) {
               <dt>Wallet</dt>
               <dd>
                 {wallet === 'create'
-                  ? `New, app phrase account ${(walletInfo?.nextAccount ?? 0) + 1}`
+                  ? `${walletInfo?.hasPhrase ? 'App wallet' : 'New app wallet'}, account ${(walletInfo?.nextAccount ?? 0) + 1}`
                   : wallet === 'phrase'
                     ? `Your phrase, account ${(account ?? 0) + 1}`
                     : 'Imported key'}
