@@ -40,7 +40,10 @@ html, body { margin: 0; }
 .nx .conn { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-2); padding: 4px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line-soft); }
 .nx .conn.bad, .nx .conn.t-serious { color: var(--serious-ink); background: var(--serious-bg); border-color: color-mix(in srgb, var(--serious) 40%, transparent); }
 .nx .conn.t-warn { color: var(--warn-ink); background: var(--warn-bg); border-color: var(--warn-line); }
-.nx .conn { position: relative; cursor: default; }
+.nx .conn { position: relative; cursor: default; transition: background .12s, border-color .12s; }
+.nx .conn:hover, .nx .conn:focus-visible { background: var(--sel); border-color: var(--line); }
+.nx .conn.t-warn:hover { background: color-mix(in srgb, var(--warn-bg) 80%, var(--warn-line)); }
+.nx .conn.t-serious:hover, .nx .conn.bad:hover { background: color-mix(in srgb, var(--serious-bg) 80%, var(--serious)); }
 .nx .conn .tip { display: none; position: absolute; top: calc(100% + 10px); right: 0; z-index: 40; width: max-content; min-width: 280px; max-width: 380px; padding: 14px 16px; border-radius: 12px; background: var(--pop); border: 1px solid var(--line); box-shadow: var(--shadow); color: var(--ink); font-size: 13px; flex-direction: column; gap: 12px; }
 .nx .conn:hover .tip, .nx .conn:focus-visible .tip { display: flex; }
 .nx .tip-h { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 650; }
@@ -228,7 +231,7 @@ html, body { margin: 0; }
 .nx .bcard-new:hover .bcard-new-i { color: var(--accent); }
 .nx .bcard.is-preview { border-style: dashed; background: color-mix(in srgb, var(--panel) 70%, var(--page)); }
 .nx .bcard-h { display: flex; align-items: center; gap: 8px; }
-.nx .bcard-pair { font-weight: 650; font-size: 15px; }
+.nx .bcard-pair { font-weight: 650; font-size: 15px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nx .bcard-reason { color: var(--ink-2); font-size: 13px; min-height: 2.9em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .nx .bcard-nums { display: flex; gap: 22px; align-items: flex-end; }
 .nx .bcard-nums .k { font-size: 11.5px; color: var(--muted); }
@@ -311,8 +314,8 @@ html, body { margin: 0; }
 .nx .bot-meta > div::before { content: ''; width: 1px; height: 12px; background: var(--line); margin: 0 6px 0 12px; }
 .nx .bot-meta dt { color: var(--faint); }
 .nx .bot-meta dd { margin: 0; color: var(--ink-2); display: inline-flex; align-items: center; gap: 4px; }
-.nx .bot-meta .addr a { color: var(--ink-2); }
-.nx .bot-meta .addr a:hover { color: var(--accent); }
+.nx .bot-meta dd a { color: var(--accent); }
+.nx .bot-meta dd a:hover { text-decoration: underline; }
 .nx .keyok { color: var(--good-ink); }
 .nx .keybad { color: var(--serious-ink); }
 .nx .bot-actions { display: flex; gap: 8px; flex: none; padding-top: 2px; }

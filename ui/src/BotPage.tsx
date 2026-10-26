@@ -12,6 +12,8 @@ import { WalletTab } from './WalletTab';
 
 type Tab = 'overview' | 'activity' | 'wallet' | 'safety' | 'settings' | 'actions';
 
+const poolContract = (bot: BotView): string | null => bot.poolContract || (bot.poolId.includes('.') ? bot.poolId : null);
+
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'overview', label: 'Overview' },
   { id: 'activity', label: 'Activity' },
@@ -117,8 +119,9 @@ function Header({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
           <div>
             <dt>Pool</dt>
             <dd className="mono">
-              {bot.poolContract ? (
-                <a className="mono" href={explorerContract(bot.poolContract)} target="_blank" rel="noreferrer" title={bot.poolContract}>
+              {/* Simulations carry no contract read; their pool id is already the contract principal. */}
+              {poolContract(bot) ? (
+                <a className="mono" href={explorerContract(poolContract(bot) || '')} target="_blank" rel="noreferrer" title={poolContract(bot) || ''}>
                   {poolName(bot.poolId)}
                 </a>
               ) : (

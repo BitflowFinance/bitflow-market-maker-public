@@ -114,6 +114,11 @@ function Shell({
 
   const needCount = fleet.needs.length;
   const [showSims, setShowSims] = useState(false);
+  const [showBots, setShowBots] = useState(true);
+  // A folded section still lists the bot being viewed, so the rail always shows where you are.
+  const current = loc.pathname.startsWith('/bots/') ? decodeURIComponent(loc.pathname.slice('/bots/'.length)) : '';
+  const shownBots = showBots ? real : real.filter((bot) => bot.id === current);
+  const shownSims = !real.length || showSims ? previews : previews.filter((bot) => bot.id === current);
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [loc.pathname]);
@@ -163,8 +168,17 @@ function Shell({
           </span>
           {needCount ? <span className="count">{needCount}</span> : null}
         </NavLink>
-        <div className="rail-h">Your bots</div>
-        {real.length ? real.map((bot) => <RailBot key={bot.id} bot={bot} />) : <div className="rail-empty">None yet</div>}
+        {real.length ? (
+          <button type="button" className="rail-h rail-toggle" onClick={() => setShowBots(!showBots)} aria-expanded={showBots}>
+            Your bots
+            <span className={`chev${showBots ? ' open' : ''}`}>
+              <Icon name="chevron" size={12} />
+            </span>
+          </button>
+        ) : (
+          <div className="rail-h">Your bots</div>
+        )}
+        {real.length ? shownBots.map((bot) => <RailBot key={bot.id} bot={bot} />) : <div className="rail-empty">None yet</div>}
         <NavLink to="/new" className={({ isActive }) => `rl rl-top${isActive ? ' on' : ''}`}>
           <Icon name="plus" size={16} />
           <span className="rl-main">
@@ -182,11 +196,9 @@ function Shell({
         ) : (
           <div className="rail-h">Simulations</div>
         )}
-        {!real.length || showSims
-          ? previews.map((bot) => (
-              <RailBot key={bot.id} bot={bot} />
-            ))
-          : null}
+        {shownSims.map((bot) => (
+          <RailBot key={bot.id} bot={bot} />
+        ))}
       </nav>
       <main className="main2">
         {offline ? (

@@ -11,6 +11,7 @@ export function HomePage({ fleet, now, reload }: Shared) {
   const previews = fleet.bots.filter((bot) => bot.preview);
   const book = fleet.book.real;
   const [showSims, setShowSims] = useState(false);
+  const [showBots, setShowBots] = useState(true);
   return (
     <div className="page">
       {real.length === 0 ? (
@@ -42,7 +43,15 @@ export function HomePage({ fleet, now, reload }: Shared) {
             </Card>
           ) : null}
           <section className="sec">
-            <h2 className="sec-h">Your bots</h2>
+            <div className="sec-row">
+              <button type="button" className="sec-h sec-toggle" onClick={() => setShowBots(!showBots)} aria-expanded={showBots}>
+                Your bots
+                <span className={`chev${showBots ? ' open' : ''}`}>
+                  <Icon name="chevron" size={14} />
+                </span>
+              </button>
+            </div>
+            {showBots ? (
             <div className="cards">
               {real.map((bot) => (
                 <BotCard key={bot.id} bot={bot} now={now} />
@@ -55,6 +64,7 @@ export function HomePage({ fleet, now, reload }: Shared) {
                 <span className="muted">Same pair or a different one. Each bot gets its own wallet.</span>
               </Link>
             </div>
+            ) : null}
           </section>
         </>
       )}
@@ -151,7 +161,7 @@ export function BotCard({ bot, now }: { bot: BotView; now: number }) {
   return (
     <Link to={`/bots/${bot.id}`} className={`bcard${bot.preview ? ' is-preview' : ''}`}>
       <div className="bcard-h">
-        <span className="bcard-pair">{bot.name || bot.pair}</span>
+        <span className="bcard-pair" title={bot.name || bot.pair}>{bot.name || bot.pair}</span>
         {bot.preview ? null : <ModeBadge preview={false} mode={bot.mode} />}
         <span className="spacer" />
         <Status tone={bot.state.tone} label={bot.state.label} title={bot.reason?.text || bot.state.detail} />
