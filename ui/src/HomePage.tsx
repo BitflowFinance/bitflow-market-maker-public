@@ -47,6 +47,13 @@ export function HomePage({ fleet, now, reload }: Shared) {
               {real.map((bot) => (
                 <BotCard key={bot.id} bot={bot} now={now} />
               ))}
+              <Link to="/new" className="bcard bcard-new">
+                <span className="bcard-new-i">
+                  <Icon name="plus" size={18} />
+                </span>
+                <b>New bot</b>
+                <span className="muted">Same pair or a different one. Each bot gets its own wallet.</span>
+              </Link>
             </div>
           </section>
         </>
@@ -64,7 +71,7 @@ export function HomePage({ fleet, now, reload }: Shared) {
           ) : (
             <h2 className="sec-h">Simulations</h2>
           )}
-          <span className="muted">Simulated funds, to see how a bot behaves.</span>
+          {real.length && showSims ? null : <span className="muted">Simulated funds, to see how a bot behaves.</span>}
         </div>
         {!real.length || showSims ? (
           <div className="cards">

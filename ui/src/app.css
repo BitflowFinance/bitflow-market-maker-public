@@ -221,6 +221,10 @@ html, body { margin: 0; }
 .nx .cards.three { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .nx .bcard { display: grid; gap: 12px; padding: 16px 18px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); transition: border-color .12s, transform .12s, box-shadow .12s; }
 .nx .bcard:hover { text-decoration: none; border-color: var(--accent); box-shadow: var(--shadow); }
+.nx .bcard-new { place-items: center; align-content: center; text-align: center; gap: 6px; border-style: dashed; background: transparent; color: var(--ink-2); min-height: 140px; }
+.nx .bcard-new:hover { box-shadow: none; color: var(--ink); }
+.nx .bcard-new-i { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-2); color: var(--muted); }
+.nx .bcard-new:hover .bcard-new-i { color: var(--accent); }
 .nx .bcard.is-preview { border-style: dashed; background: color-mix(in srgb, var(--panel) 70%, var(--page)); }
 .nx .bcard-h { display: flex; align-items: center; gap: 8px; }
 .nx .bcard-pair { font-weight: 650; font-size: 15px; }

@@ -464,7 +464,7 @@ export const stateOf = (record: BotRecord, nowMs: number): BotState => {
   }
   if (!record.running) {
     return {
-      tone: 'warn',
+      tone: 'serious',
       label: 'Stopped',
       detail: record.startError || 'Stopped. Liquidity stays in the pool.',
     };
@@ -501,7 +501,7 @@ export const needsOf = (record: BotRecord, nowMs: number): NeedItem[] => {
     detail,
   });
   if (!record.running) {
-    return [item('stopped', 'warn', 'is stopped', record.startError || 'Liquidity stays in the pool.')];
+    return [item('stopped', 'serious', 'is stopped', record.startError || 'Liquidity stays in the pool.')];
   }
   if (record.paused) return [];
   if (!record.lastTick) {
