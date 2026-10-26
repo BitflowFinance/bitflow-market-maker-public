@@ -776,6 +776,10 @@ export const toView = (record: BotRecord, sharedAddress: boolean, nowMs: number)
   const valued = valuedTick(record.history) || latest;
   // Status comes from the latest check; balances, price and value from the last one that read them.
   const shown: BotRecord = { ...record, lastTick: valued };
+  // Failed reads carry balances forward but have no strategy signals, so the
+  // market check, curve and inventory bands come from the last check that had them.
+  const signalled = [...record.history].reverse().find((item) => item.signals && Object.keys(item.signals).length) || valued;
+  const strategic: BotRecord = { ...record, lastTick: signalled };
   const tick = valued;
   const price = priceOf(shown);
   const value = tick ? (tick.portfolioValue ?? null) : null;
@@ -813,9 +817,9 @@ export const toView = (record: BotRecord, sharedAddress: boolean, nowMs: number)
     inventoryShare: value && baseValue != null && value > 0 ? baseValue / value : null,
     walletStx: tick && tick.walletStx != null ? tick.walletStx : null,
     gasTxLeft: gasTxLeftOf(shown),
-    market: marketOf(shown),
-    inventory: inventoryOf(shown, value && baseValue != null && value > 0 ? baseValue / value : null),
-    curve: curveOf(shown),
+    market: marketOf(strategic),
+    inventory: inventoryOf(strategic, value && baseValue != null && value > 0 ? baseValue / value : null),
+    curve: curveOf(strategic),
     insights: record.insights || null,
     binsOursExact: record.binsOursExact !== false,
     poolContract: record.poolContract || null,
