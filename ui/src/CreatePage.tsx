@@ -188,7 +188,7 @@ export function CreatePage({ fleet, reload }: Shared) {
           </div>
           {pool ? (
             <div className="pickpool">
-              <div className="field-l">Pool</div>
+              <h2 className="sub-h">Pool</h2>
               {catalogError ? (
                 <p className="note">Could not load the pool list ({catalogError}). The bot will use the standard {pool.pair} pool.</p>
               ) : catalog ? (

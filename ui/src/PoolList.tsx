@@ -51,11 +51,11 @@ function Row({ pool, quote, selected, current, onPick }: { pool: PoolOption; quo
       {pool.reasons.length ? <span className="pl-why">{pool.reasons[0]}</span> : null}
     </>
   );
-  if (!onPick || !pool.ok || current) {
+  if (!onPick || current) {
     return <div className={`pl-row${pool.ok ? '' : ' off'}${current ? ' cur' : ''}`}>{body}</div>;
   }
   return (
-    <button type="button" role="radio" aria-checked={selected} className={`pl-row${selected ? ' on' : ''}`} onClick={onPick}>
+    <button type="button" role="radio" aria-checked={selected} className={`pl-row${pool.ok ? '' : ' off'}${selected ? ' on' : ''}`} onClick={onPick}>
       {body}
     </button>
   );
@@ -75,9 +75,11 @@ export function PoolList({
   onChange: (poolId: string) => void;
   currentPoolId?: string;
 }) {
-  const [showAll, setShowAll] = useState(false);
   const usable = catalog.pools.filter((pool) => pool.ok);
   const skipped = catalog.pools.filter((pool) => !pool.ok);
+  // A chosen pool that fails a check stays visible even when the others are folded.
+  const [showAll, setShowAll] = useState(() => skipped.some((pool) => pool.poolId === value));
+  const picked = catalog.pools.find((pool) => pool.poolId === value);
   if (!catalog.pools.length) return <p className="muted">No pools found for this pair right now.</p>;
   return (
     <div className="pl" role="radiogroup">
@@ -90,14 +92,26 @@ export function PoolList({
         <Row key={pool.poolId} pool={pool} quote={quote} selected={pool.poolId === value} current={pool.poolId === currentPoolId} onPick={() => onChange(pool.poolId)} />
       ))}
       {!usable.length ? <p className="form-err">No pool of this pair suits the bot right now.</p> : null}
+      {picked && !picked.ok && picked.poolId !== currentPoolId ? (
+        <div className="banner2 warn">
+          <Icon name="warn" />
+          <div className="grow">
+            <b>Not recommended.</b> {picked.reasons.join(' ')} The bot may halt or sit out of range here.
+          </div>
+        </div>
+      ) : null}
       {skipped.length ? (
         <>
           <button type="button" className="btn sm ghost pl-more" onClick={() => setShowAll(!showAll)} aria-expanded={showAll}>
-            <Icon name={showAll ? 'x' : 'plus'} size={12} />
+            <span className={`chev${showAll ? ' open' : ''}`}>
+              <Icon name="chevron" size={12} />
+            </span>
             {showAll ? 'Hide' : 'Show'} {skipped.length} other pool{skipped.length === 1 ? '' : 's'}
           </button>
           {showAll
-            ? skipped.map((pool) => <Row key={pool.poolId} pool={pool} quote={quote} selected={false} current={pool.poolId === currentPoolId} />)
+            ? skipped.map((pool) => (
+                <Row key={pool.poolId} pool={pool} quote={quote} selected={pool.poolId === value} current={pool.poolId === currentPoolId} onPick={() => onChange(pool.poolId)} />
+              ))
             : null}
         </>
       ) : null}

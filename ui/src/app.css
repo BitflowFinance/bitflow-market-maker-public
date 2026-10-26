@@ -493,12 +493,16 @@ html, body { margin: 0; }
 .nx .qr { border-radius: 8px; flex: none; border: 1px solid var(--line); }
 
 /* pools */
-.nx .pickpool { display: grid; gap: 10px; padding-top: 4px; }
+.nx .pickpool { display: grid; gap: 10px; padding-top: 8px; border-top: 1px solid var(--line-soft); }
+/* A second heading inside a card, matching the card's own title. */
+.nx .sub-h { font-size: 14.5px; font-weight: 650; margin-top: 6px; }
+.nx .pl-row.off.on { border-style: solid; }
 .nx .pl { display: grid; gap: 8px; }
 .nx .pl-row { font: inherit; text-align: left; color: var(--ink); display: grid; gap: 6px; padding: 12px 14px; border-radius: 10px; border: 1.5px solid var(--line); background: var(--page); cursor: pointer; }
 .nx button.pl-row:hover { border-color: var(--accent); }
 .nx .pl-row.on { border-color: var(--accent); background: var(--info-bg); box-shadow: 0 0 0 3px var(--accent-soft); }
-.nx .pl-row.off { cursor: default; background: var(--panel-2); border-style: dashed; color: var(--ink-2); }
+.nx .pl-row.off { background: var(--panel-2); border-style: dashed; color: var(--ink-2); }
+.nx div.pl-row.off { cursor: default; }
 .nx .pl-row.cur { cursor: default; }
 .nx .pl-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .nx .pl-name { font-size: 12.5px; font-weight: 600; }
