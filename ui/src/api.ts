@@ -116,7 +116,8 @@ export interface BotView {
   insights: Insights | null;
   binsOursExact: boolean;
   poolContract: string | null;
-  keySource: 'create' | 'import' | null;
+  keySource: 'create' | 'import' | 'phrase' | 'app-phrase' | null;
+  walletAccount: number | null;
   keyBackedUp: boolean;
   keyBackupAt: string | null;
   payoutAddress: string | null;
@@ -183,11 +184,23 @@ export interface CashOutJob {
   lines: LogLine[];
 }
 
-export interface KeyBackup {
+export type KeyBackup =
+  | { kind: 'key'; address: string; key: string; pair: string; file: string }
+  | { kind: 'phrase'; address: string; phrase: string; account: number; pair: string; file: string };
+
+export interface WalletInfo {
+  hasPhrase: boolean;
+  backedUp: boolean;
+  nextAccount: number;
+}
+
+export interface PhraseAccount {
+  account: number;
   address: string;
-  key: string;
-  pair: string;
-  file: string;
+  /** Whether the address has sent a transaction; null when it could not be told. */
+  used: boolean | null;
+  /** The id of the bot already on this account, if any. */
+  bot: string | null;
 }
 
 export interface BookPart {

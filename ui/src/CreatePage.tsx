@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { BotView, ProfileInfo, Strategy, api } from './api';
+import { BotView, PhraseAccount, ProfileInfo, Strategy, WalletInfo, api } from './api';
 import type { Shared } from './App';
 import { poolName, tok } from './format';
 import { PoolList, usePoolCatalog } from './PoolList';
@@ -8,10 +8,14 @@ import { QrCode } from './QrCode';
 import { Card, CopyButton, Icon, Seg, useToast } from './ui';
 import { KeyBackup } from './WalletTab';
 
-// A generated key exists only in the env file, so its backup is a step of its
-// own before funding. An imported key is already in the user's wallet app.
-const stepsFor = (wallet: 'create' | 'import'): string[] =>
-  wallet === 'create' ? ['Pair', 'Wallet', 'Review', 'Back up', 'Fund'] : ['Pair', 'Wallet', 'Review', 'Fund'];
+type WalletChoice = 'create' | 'phrase' | 'import';
+
+// The app's phrase exists only in .mm-wallet, so backing it up is a step of its
+// own before funding, until it has been saved once (it covers every later bot).
+// An imported phrase or key is already in the user's wallet app.
+const stepsFor = (backup: boolean): string[] => (backup ? ['Pair', 'Wallet', 'Review', 'Back up', 'Fund'] : ['Pair', 'Wallet', 'Review', 'Fund']);
+
+const wordCount = (text: string): number => (text.trim() ? text.trim().split(/\s+/).length : 0);
 
 export function CreatePage({ fleet, reload }: Shared) {
   const toast = useToast();
@@ -20,7 +24,14 @@ export function CreatePage({ fleet, reload }: Shared) {
   const [loadError, setLoadError] = useState('');
   const [step, setStep] = useState(0);
   const [poolId, setPoolId] = useState('');
-  const [wallet, setWallet] = useState<'create' | 'import'>('create');
+  const [wallet, setWallet] = useState<WalletChoice>('create');
+  const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null);
+  const [phrase, setPhrase] = useState('');
+  const [accounts, setAccounts] = useState<PhraseAccount[] | null>(null);
+  const [account, setAccount] = useState<number | null>(null);
+  const [finding, setFinding] = useState(false);
+  const [phraseError, setPhraseError] = useState('');
+  const [backupNeeded, setBackupNeeded] = useState(false);
   const [key, setKey] = useState('');
   const [address, setAddress] = useState('');
   const [busy, setBusy] = useState(false);
@@ -52,6 +63,12 @@ export function CreatePage({ fleet, reload }: Shared) {
   }, []);
 
   useEffect(() => {
+    api<WalletInfo>('/api/wallet')
+      .then(setWalletInfo)
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     if (!from) return;
     api<Strategy>(`/api/bots/${encodeURIComponent(from)}/strategy`)
       .then((res) => {
@@ -79,7 +96,27 @@ export function CreatePage({ fleet, reload }: Shared) {
   const pool = profiles?.find((item) => item.id === poolId) || null;
   const keyOk = /^(0x)?[0-9a-fA-F]{64}(01)?$/.test(key.trim());
   const created = fleet.bots.find((bot) => bot.id === createdId);
-  const steps = stepsFor(wallet);
+  const steps = stepsFor(createdId ? backupNeeded : wallet === 'create' && !walletInfo?.backedUp);
+  const words = wordCount(phrase);
+  const walletOk = wallet === 'create' || (wallet === 'import' ? keyOk : account != null && !accounts?.find((item) => item.account === account)?.bot);
+
+  const findAccounts = async () => {
+    setFinding(true);
+    setPhraseError('');
+    setAccounts(null);
+    setAccount(null);
+    try {
+      const res = await api<{ accounts: PhraseAccount[] }>('/api/wallet/accounts', 'POST', { phrase });
+      setAccounts(res.accounts);
+      // Default to the first account no bot here uses yet.
+      const free = res.accounts.find((item) => !item.bot);
+      setAccount(free ? free.account : null);
+    } catch (err) {
+      setPhraseError(err instanceof Error ? err.message : 'Could not read that phrase.');
+    } finally {
+      setFinding(false);
+    }
+  };
   const fundStep = steps.length - 1;
   const { catalog, error: catalogError } = usePoolCatalog(pool ? pool.id : null);
   useEffect(() => {
@@ -95,9 +132,11 @@ export function CreatePage({ fleet, reload }: Shared) {
     setBusy(true);
     setError('');
     try {
-      const res = await api<{ bot: BotView }>('/api/bots', 'POST', {
+      const res = await api<{ bot: BotView; backupNeeded: boolean }>('/api/bots', 'POST', {
         profile: pool.id,
         wallet,
+        phrase: wallet === 'phrase' ? phrase : undefined,
+        account: wallet === 'phrase' ? account : undefined,
         signerKey: wallet === 'import' ? key.trim().replace(/^0x/, '') : undefined,
         signerAddress: wallet === 'import' && address.trim() ? address.trim() : undefined,
         poolId: contract || undefined,
@@ -105,6 +144,9 @@ export function CreatePage({ fleet, reload }: Shared) {
         settings: strategy && strategy.pair === pool.id ? strategy.settings : undefined,
       });
       setKey('');
+      setPhrase('');
+      setAccounts(null);
+      setBackupNeeded(res.backupNeeded);
       setCreatedId(res.bot.id);
       setStep(3);
       toast('good', 'Bot created.');
@@ -215,13 +257,77 @@ export function CreatePage({ fleet, reload }: Shared) {
             onChange={setWallet}
             options={[
               { value: 'create', label: 'New wallet' },
-              { value: 'import', label: 'Import key' },
+              { value: 'phrase', label: 'Recovery phrase' },
+              { value: 'import', label: 'Private key' },
             ]}
           />
           {wallet === 'create' ? (
-            <p className="muted">
-              The key is saved in <code>.env.{pool.id}</code>. The next steps show it once so you can save a copy.
-            </p>
+            walletInfo?.hasPhrase ? (
+              <p className="muted">
+                Uses this app's recovery phrase, account {walletInfo.nextAccount + 1}: a wallet of its own that the same phrase restores.
+                {walletInfo.backedUp ? ' You already saved the phrase, so there is nothing new to back up.' : ' The next steps show the phrase so you can save a copy.'}
+              </p>
+            ) : (
+              <p className="muted">
+                The app makes a recovery phrase, saved in <code>.mm-wallet</code> on this computer. This bot gets account 1; later bots get accounts 2, 3 and on, so one
+                saved phrase covers them all. The next steps show it once so you can save a copy.
+              </p>
+            )
+          ) : wallet === 'phrase' ? (
+            <div className="explain">
+              <label className="field">
+                <span className="field-l">Recovery phrase</span>
+                <textarea
+                  className="in mono"
+                  rows={3}
+                  value={phrase}
+                  onChange={(e) => {
+                    setPhrase(e.target.value);
+                    setAccounts(null);
+                    setAccount(null);
+                  }}
+                  placeholder="12 or 24 words"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <span className="sf-h">
+                  Only the chosen account's key is saved, in this bot's env file; the phrase is not stored. Use an account nothing else spends from.
+                </span>
+              </label>
+              <div>
+                <button type="button" className="btn" disabled={(words !== 12 && words !== 24) || finding} onClick={() => void findAccounts()}>
+                  {finding ? 'Finding…' : 'Find accounts'}
+                </button>
+              </div>
+              {phraseError ? <p className="form-err">{phraseError}</p> : null}
+              {accounts ? (
+                <div className="pl" role="radiogroup">
+                  {accounts.map((item) => (
+                    <button
+                      key={item.account}
+                      type="button"
+                      role="radio"
+                      aria-checked={account === item.account}
+                      disabled={Boolean(item.bot)}
+                      className={`pl-row${account === item.account ? ' on' : ''}${item.bot ? ' off' : ''}`}
+                      onClick={() => setAccount(item.account)}
+                    >
+                      <span className="pl-h">
+                        <b>Account {item.account + 1}</b>
+                        {item.bot ? <span className="tag">Bot {item.bot}</span> : item.used ? <span className="tag t-warn">Has history</span> : item.used === false ? <span className="tag t-good">Unused</span> : null}
+                      </span>
+                      <span className="pl-facts mono">{item.address}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {account != null && accounts?.find((item) => item.account === account)?.used ? (
+                <div className="banner2 warn">
+                  <Icon name="warn" />
+                  <div className="grow">This account has sent transactions before. If anything else spends from it, the bot's nonces and balances will clash.</div>
+                </div>
+              ) : null}
+            </div>
           ) : (
             <div className="explain">
               <label className="field">
@@ -236,7 +342,7 @@ export function CreatePage({ fleet, reload }: Shared) {
                   spellCheck={false}
                 />
                 <span className={`sf-h${key && !keyOk ? ' bad' : ''}`}>
-                  Saved in <code>.env.{pool.id}</code>. Use a wallet nothing else spends from.
+                  Saved in this bot's env file. Use a wallet nothing else spends from.
                 </span>
               </label>
               <label className="field">
@@ -252,7 +358,7 @@ export function CreatePage({ fleet, reload }: Shared) {
               Back
             </button>
             <span className="spacer" />
-            <button type="button" className="btn primary" disabled={wallet === 'import' && !keyOk} onClick={() => setStep(2)}>
+            <button type="button" className="btn primary" disabled={!walletOk} onClick={() => setStep(2)}>
               Continue
               <Icon name="arrow" />
             </button>
@@ -277,7 +383,13 @@ export function CreatePage({ fleet, reload }: Shared) {
             </div>
             <div className="fact-row">
               <dt>Wallet</dt>
-              <dd>{wallet === 'create' ? 'New' : 'Imported'}</dd>
+              <dd>
+                {wallet === 'create'
+                  ? `New, app phrase account ${(walletInfo?.nextAccount ?? 0) + 1}`
+                  : wallet === 'phrase'
+                    ? `Your phrase, account ${(account ?? 0) + 1}`
+                    : 'Imported key'}
+              </dd>
             </div>
             <div className="fact-row">
               <dt>Strategy</dt>
@@ -304,7 +416,7 @@ export function CreatePage({ fleet, reload }: Shared) {
       ) : null}
 
       {step === 3 && step < fundStep && pool ? (
-        <Card title="Back up the key">
+        <Card title={created?.keySource === 'app-phrase' ? 'Back up the recovery phrase' : 'Back up the key'}>
           {created ? <KeyBackup bot={created} onDone={() => setStep(fundStep)} /> : <span className="spinner" />}
         </Card>
       ) : null}
@@ -352,7 +464,7 @@ export function CreatePage({ fleet, reload }: Shared) {
           </Card>
           <div className="row-between">
             <span className="spacer" />
-            <button type="button" className="btn primary" onClick={() => navigate(`/bots/${pool.id}`)}>
+            <button type="button" className="btn primary" onClick={() => navigate(`/bots/${createdId || pool.id}`)}>
               Open the bot
               <Icon name="arrow" />
             </button>

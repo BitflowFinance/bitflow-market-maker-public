@@ -50,7 +50,8 @@ type BotProfile = Profile & { pairId: string };
 
 const BOT_ID = /^[a-z0-9][a-z0-9-]{0,40}$/;
 const ENV_FILE = /^\.env\.([a-z0-9][a-z0-9-]{0,40})$/;
-import { createWallet, walletFromPrivateKey } from './wallet';
+import { walletFromPrivateKey } from './wallet';
+import { accountOf, isPhrase, newPhrase } from './phrase';
 
 export class HttpError extends Error {
   status: number;
@@ -114,7 +115,10 @@ const CASH_OUT_TIMEOUT_MS = 30 * 60_000;
 
 export interface CreateInput {
   profile: string;
-  wallet: 'create' | 'import';
+  /** create: the next account of this app's phrase. phrase: an account of the user's own phrase. import: a hex key. */
+  wallet: 'create' | 'import' | 'phrase';
+  phrase?: string;
+  account?: number;
   /** A pool of this pair from the pool list; the profile's default when omitted. */
   poolId?: string;
   name?: string;
@@ -375,7 +379,7 @@ export class ConsoleStore {
     return this.one(id, Date.now());
   }
 
-  async create(input: CreateInput): Promise<{ bot: BotView; funding: Profile['suggest'] }> {
+  async create(input: CreateInput): Promise<{ bot: BotView; funding: Profile['suggest']; backupNeeded: boolean }> {
     const profile = profileById(input.profile);
     if (!profile) throw new HttpError(400, 'unknown_pool', 'Pick the sBTC pool or the STX pool.');
     const settings = input.settings || {};
@@ -391,17 +395,32 @@ export class ConsoleStore {
     for (let n = 2; taken.has(id); n += 1) id = `${profile.id}-${n}`;
     const envPath = this.envPath(id);
     let material: { address: string; key: string };
+    let keySource: string = input.wallet;
+    let account: number | null = null;
     try {
-      material =
-        input.wallet === 'import'
-          ? walletFromPrivateKey(input.signerKey || '')
-          : input.wallet === 'create'
-            ? createWallet()
-            : { address: '', key: '' };
+      if (input.wallet === 'import') {
+        material = walletFromPrivateKey(input.signerKey || '');
+      } else if (input.wallet === 'phrase') {
+        if (!isPhrase(input.phrase || '')) throw new Error('That is not a valid 12 or 24 word recovery phrase.');
+        account = Number(input.account ?? 0);
+        material = accountOf(input.phrase || '', account);
+        // The user's own phrase is already theirs to keep; only the derived key is stored.
+        keySource = 'phrase';
+      } else {
+        // One app phrase for every bot it creates, one account each, so a single backup covers them all.
+        const wallet = this.appWallet(true) as AppWallet;
+        account = this.nextAppAccount();
+        material = accountOf(wallet.phrase, account);
+        keySource = 'app-phrase';
+      }
     } catch (err) {
+      if (err instanceof HttpError) throw err;
       throw new HttpError(400, 'wallet', (err as Error).message);
     }
     if (!material.key) throw new HttpError(400, 'wallet', 'Create a new wallet or import one.');
+    // Two bots on one account would send clashing transactions.
+    const clash = this.botIds().find((bot) => readEnvFile(this.envPath(bot)).SIGNER_ADDRESS === material.address);
+    if (clash) throw new HttpError(409, 'wallet_in_use', `That account already runs the bot "${clash}". Pick another account.`);
     if (input.wallet === 'import' && input.signerAddress && input.signerAddress !== material.address) {
       throw new HttpError(400, 'address_mismatch', 'That key does not match the address you entered.');
     }
@@ -417,7 +436,8 @@ export class ConsoleStore {
       EXECUTION_MODE: 'dry_run',
       SIGNER_ADDRESS: material.address,
       SIGNER_KEY: material.key,
-      KEY_SOURCE: input.wallet,
+      KEY_SOURCE: keySource,
+      WALLET_ACCOUNT: account == null ? '' : String(account),
       KILL_SWITCH: 'false',
       KILL_SWITCH_FILE: `data/kill.${id}`,
       PID_FILE: `data/bot.${id}.pid`,
@@ -428,7 +448,7 @@ export class ConsoleStore {
     this.launch(id);
     // A failed start leaves the bot created and stopped; the error shows on its page.
     const bot = await this.one(id, Date.now());
-    return { bot, funding: profile.suggest };
+    return { bot, funding: profile.suggest, backupNeeded: !bot.keyBackedUp };
   }
 
   async updateSettings(
@@ -539,7 +559,7 @@ export class ConsoleStore {
   }
 
   /** The raw key, for the page's backup step only. The server gates this route to the page. */
-  keyBackup(id: string, acknowledged: boolean): { address: string; key: string; pair: string; file: string } {
+  keyBackup(id: string, acknowledged: boolean): KeyBackup {
     if (id.startsWith('preview-')) throw new HttpError(400, 'preview', 'Preview bots have no wallet.');
     const profile = this.requireProfile(id);
     if (!acknowledged) {
@@ -547,7 +567,11 @@ export class ConsoleStore {
     }
     const env = readEnvFile(this.envPath(profile.id));
     if (!env.SIGNER_KEY || !env.SIGNER_ADDRESS) throw new HttpError(409, 'no_wallet', 'This bot has no wallet key.');
-    return { address: env.SIGNER_ADDRESS, key: env.SIGNER_KEY, pair: profile.pair, file: `.env.${profile.id}` };
+    const wallet = env.KEY_SOURCE === 'app-phrase' ? this.appWallet(false) : null;
+    if (wallet) {
+      return { kind: 'phrase', address: env.SIGNER_ADDRESS, phrase: wallet.phrase, account: Number(env.WALLET_ACCOUNT || 0), pair: profile.pair, file: APP_WALLET_FILE };
+    }
+    return { kind: 'key', address: env.SIGNER_ADDRESS, key: env.SIGNER_KEY, pair: profile.pair, file: `.env.${profile.id}` };
   }
 
   /** Records the backup once the user proves they have the key by typing its last characters. */
@@ -557,6 +581,13 @@ export class ConsoleStore {
     const envPath = this.envPath(profile.id);
     const env = readEnvFile(envPath);
     const tail = keyTail.trim().toLowerCase();
+    const wallet = env.KEY_SOURCE === 'app-phrase' ? this.appWallet(false) : null;
+    if (wallet) {
+      // The phrase's last word proves the copy was made; one backup covers every bot on it.
+      if (tail !== wallet.phrase.split(' ').slice(-1)[0]) throw new HttpError(400, 'key_tail', 'That is not the last word of the phrase you saved.');
+      this.saveAppWallet({ ...wallet, backedUpAt: new Date().toISOString() });
+      return this.one(id, Date.now());
+    }
     if (!env.SIGNER_KEY || tail.length < KEY_TAIL_CHARS || !env.SIGNER_KEY.toLowerCase().endsWith(tail)) {
       throw new HttpError(400, 'key_tail', `That does not match. Type the last ${KEY_TAIL_CHARS} characters of the key you saved.`);
     }
@@ -640,6 +671,62 @@ export class ConsoleStore {
         job.finishedAt = new Date().toISOString();
       });
     return job;
+  }
+
+  /** Whether the app has its own phrase, whether it is backed up, and the account the next bot gets. Never the phrase. */
+  walletInfo(): { hasPhrase: boolean; backedUp: boolean; nextAccount: number } {
+    const wallet = this.appWallet(false);
+    return { hasPhrase: Boolean(wallet), backedUp: Boolean(wallet?.backedUpAt), nextAccount: this.nextAppAccount() };
+  }
+
+  /** The first accounts of a phrase the user pastes, with which ones already have history or a bot. The phrase is not kept. */
+  async phraseAccounts(phrase: string): Promise<Array<{ account: number; address: string; used: boolean | null; bot: string | null }>> {
+    if (!isPhrase(phrase)) throw new HttpError(400, 'phrase', 'That is not a valid 12 or 24 word recovery phrase.');
+    const bots = new Map(this.botIds().map((bot) => [readEnvFile(this.envPath(bot)).SIGNER_ADDRESS, bot]));
+    return Promise.all(
+      [0, 1, 2, 3, 4].map(async (account) => {
+        const { address } = accountOf(phrase, account);
+        return { account, address, used: await this.walletTokens.hasHistory(address), bot: bots.get(address) || null };
+      }),
+    );
+  }
+
+  private appWallet(create: boolean): AppWallet | null {
+    const file = join(this.root, APP_WALLET_FILE);
+    if (existsSync(file)) {
+      try {
+        const parsed = JSON.parse(readFileSync(file, 'utf8')) as AppWallet;
+        if (isPhrase(parsed.phrase)) return parsed;
+      } catch {
+        // Fall through: an unreadable file is never overwritten, since it may hold the only copy of a phrase.
+      }
+      throw new HttpError(500, 'wallet_file', `${APP_WALLET_FILE} could not be read. Restore it from your backup; it is not replaced automatically.`);
+    }
+    if (!create) return null;
+    const wallet: AppWallet = { phrase: newPhrase(), backedUpAt: null };
+    this.saveAppWallet(wallet);
+    return wallet;
+  }
+
+  /** The app wallet for status display; a broken file reads as absent here rather than failing the whole page. */
+  private appWalletQuiet(): AppWallet | null {
+    try {
+      return this.appWallet(false);
+    } catch {
+      return null;
+    }
+  }
+
+  private saveAppWallet(wallet: AppWallet): void {
+    writeSecretFile(join(this.root, APP_WALLET_FILE), `${JSON.stringify(wallet, null, 2)}\n`);
+  }
+
+  private nextAppAccount(): number {
+    const used = this.botIds()
+      .map((bot) => readEnvFile(this.envPath(bot)))
+      .filter((env) => env.KEY_SOURCE === 'app-phrase')
+      .map((env) => Number(env.WALLET_ACCOUNT || 0));
+    return used.length ? Math.max(...used) + 1 : 0;
   }
 
   /** Renames a bot. Only the page shows the name, so the bot keeps running. */
@@ -865,6 +952,7 @@ export class ConsoleStore {
       id: profile.id,
       profile: profile.pairId,
       name: env.BOT_NAME || null,
+      phraseBackedUp: env.KEY_SOURCE === 'app-phrase' ? Boolean(this.appWalletQuiet()?.backedUpAt) : undefined,
       preview: false,
       pair: profile.pair,
       poolId,
@@ -1094,6 +1182,18 @@ const cleanName = (raw: string): string =>
     .replace(/[\r\n"'`$\\]/g, '')
     .trim()
     .slice(0, 40);
+
+/** The app's own recovery phrase, shared by every bot it creates (one account each). Readable only by this user. */
+export const APP_WALLET_FILE = '.mm-wallet';
+
+interface AppWallet {
+  phrase: string;
+  backedUpAt: string | null;
+}
+
+export type KeyBackup =
+  | { kind: 'key'; address: string; key: string; pair: string; file: string }
+  | { kind: 'phrase'; address: string; phrase: string; account: number; pair: string; file: string };
 
 export const KEY_TAIL_CHARS = 4;
 export const PAYOUT_TAIL_CHARS = 4;

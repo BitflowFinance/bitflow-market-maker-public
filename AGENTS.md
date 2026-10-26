@@ -138,7 +138,12 @@ same CoinGecko feed + geometric curve (`POOL_STRATEGY=curve`, or the aliases
 The explicit-path flag is `--env`, never `--env-file`: Node >=20.6 has a
 built-in `--env-file` that swallows the argument before our parser runs.
 
-`SIGNER_KEY` / `SIGNER_ADDRESS` live in that env file. Metrics default to
+`SIGNER_KEY` / `SIGNER_ADDRESS` live in that env file. `KEY_SOURCE` records where
+the key came from (`create`, `import`, `phrase`, `app-phrase`) and `WALLET_ACCOUNT`
+the phrase account. The console's own phrase lives in `.mm-wallet` (0600, JSON
+`{phrase, backedUpAt}`), shared by every `app-phrase` bot at `m/44'/5757'/0'/0/<n>`;
+an unreadable `.mm-wallet` is never overwritten. An imported phrase is never stored.
+`POST /api/wallet/accounts` and the key/phrase backup routes are page-only. Metrics default to
 profile-scoped paths (`data/metrics.<name>.jsonl`). Set `METRICS_HTTP_PORT` per
 env file.
 

@@ -543,3 +543,9 @@ html, body { margin: 0; }
   .nx .page-h { flex-direction: column; align-items: flex-start; }
   .nx .txrow { flex-direction: column; align-items: stretch; }
 }
+
+/* Recovery phrase words, numbered so they can be written down in order. */
+.words { list-style: none; counter-reset: w; display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px 12px; margin: 8px 0; padding: 0; font-size: 13px; }
+.words li { counter-increment: w; }
+.words li::before { content: counter(w) '.'; display: inline-block; width: 24px; color: var(--muted, #888); }
+textarea.in { resize: vertical; min-height: 64px; }

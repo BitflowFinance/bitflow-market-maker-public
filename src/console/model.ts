@@ -202,7 +202,9 @@ export interface BotView {
   insights: Insights | null;
   binsOursExact: boolean;
   poolContract: string | null;
-  keySource: 'create' | 'import' | null;
+  keySource: 'create' | 'import' | 'phrase' | 'app-phrase' | null;
+  /** The phrase account this bot uses, when its key comes from a phrase. */
+  walletAccount: number | null;
   keyBackedUp: boolean;
   keyBackupAt: string | null;
   payoutAddress: string | null;
@@ -224,6 +226,8 @@ export interface BotRecord {
   profile: string | null;
   /** The name the user gave the bot, or null for the pair's name. */
   name?: string | null;
+  /** Whether the app's own phrase has been backed up (for bots whose key comes from it). */
+  phraseBackedUp?: boolean;
   preview: boolean;
   pair: string;
   poolId: string;
@@ -545,7 +549,7 @@ export const checklistOf = (record: BotRecord, sharedAddress: boolean): CheckIte
   const funded = live
     ? live.base > 0 || live.quote > 0 || (tick?.ownedQuote || 0) > 0 || (tick?.ownedBase || 0) > 0
     : tick != null && ((tick.walletQuote || 0) > 0 || (tick.walletBase || 0) > 0 || (tick.ownedQuote || 0) > 0);
-  const backedUp = keyBackedUp(record.env);
+  const backedUp = keyBackedUp(record);
   return [
     {
       id: 'real',
@@ -607,8 +611,13 @@ export const checklistOf = (record: BotRecord, sharedAddress: boolean): CheckIte
 
 // An imported key already lives in the user's own wallet app, so only a key this
 // app generated needs the backup step.
-const keyBackedUp = (env: Record<string, string>): boolean =>
-  env.KEY_SOURCE === 'import' || Boolean(env.KEY_BACKUP_AT);
+const keyBackedUp = (record: BotRecord): boolean => {
+  const source = record.env.KEY_SOURCE;
+  // Imported keys and the user's own phrase are already the user's to keep.
+  if (source === 'import' || source === 'phrase') return true;
+  if (source === 'app-phrase') return Boolean(record.phraseBackedUp);
+  return Boolean(record.env.KEY_BACKUP_AT);
+};
 
 export const liveBlockedBy = (checks: CheckItem[]): CheckItem[] =>
   checks.filter((item) => item.id !== 'dry-run' && !item.ok);
@@ -846,8 +855,9 @@ export const toView = (record: BotRecord, sharedAddress: boolean, nowMs: number)
     logs: record.logs,
     settings: publicSettings(record.env),
     startError: record.startError || null,
-    keySource: record.env.KEY_SOURCE === 'create' || record.env.KEY_SOURCE === 'import' ? record.env.KEY_SOURCE : null,
-    keyBackedUp: record.keySet && keyBackedUp(record.env),
+    keySource: ['create', 'import', 'phrase', 'app-phrase'].indexOf(record.env.KEY_SOURCE) >= 0 ? (record.env.KEY_SOURCE as BotView['keySource']) : null,
+    walletAccount: record.env.WALLET_ACCOUNT ? Number(record.env.WALLET_ACCOUNT) : null,
+    keyBackedUp: record.keySet && keyBackedUp(record),
     keyBackupAt: record.env.KEY_BACKUP_AT || null,
     payoutAddress: record.env.PAYOUT_ADDRESS || null,
     payoutMemo: record.env.PAYOUT_MEMO || null,

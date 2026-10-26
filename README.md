@@ -55,7 +55,13 @@ An agent uses the same helper: send JSON (`content-type: application/json`) to `
 
 **Keep `npm run ui` running.** Bots started from the page stop when it stops: closing its terminal, restarting the computer, or letting it sleep all stop a live bot. Liquidity stays in the pool while it is stopped.
 
-**Back up a new wallet.** A wallet the page creates exists only in `.env.<pool>` (readable only by your user). The create steps show the key once and ask you to save it; the Wallet tab can show it again. Going live is blocked until it is backed up. Imported keys skip this.
+**Wallets.** Each bot has a wallet of its own. When you create a bot, pick one of three:
+
+- **New wallet.** The page makes one recovery phrase, kept in `.mm-wallet` (readable only by your user), and gives each bot the next account of it (account 1, 2, 3…, the same accounts Leather and Xverse show). Save the phrase once, when the first bot is made; it restores every bot's wallet. Going live is blocked until it is backed up, and the Wallet tab can show it again.
+- **Recovery phrase.** Paste a 12 or 24 word phrase and pick an account. The page lists the first five, marking ones with history or already used by a bot here. Only that account's key is saved, in `.env.<bot>`; the phrase is not stored.
+- **Private key.** Paste the account's key as hex.
+
+Two bots can never share a wallet: the page refuses an address another bot already uses.
 
 **Cash out** goes only to a payout address you save on the Wallet tab. Saving or changing that address and showing the key work only in the page, not through the API, so an agent can cash out but cannot send funds anywhere else. If a cash out stops partway, run it again: each step reads live balances and finishes what is left. Bridging back to BTC or USDC is not built yet. From the command line: `npm run tick -- --pool sbtc --cash-out --to SP… [--memo …]`.
 

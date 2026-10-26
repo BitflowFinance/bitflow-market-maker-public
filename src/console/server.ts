@@ -98,6 +98,13 @@ export const handleConsole = async (store: ConsoleStore, req: ConsoleRequest, no
   if (method === 'GET' && path === '/api/pools') {
     return { status: 200, body: await store.poolCatalog(String((req.query || {}).profile || '')) };
   }
+  if (method === 'GET' && path === '/api/wallet') {
+    return { status: 200, body: store.walletInfo() };
+  }
+  if (method === 'POST' && path === '/api/wallet/accounts') {
+    requirePage(req);
+    return { status: 200, body: { accounts: await store.phraseAccounts(typeof body.phrase === 'string' ? body.phrase : '') } };
+  }
   if (method === 'GET' && path === '/api/profiles') {
     return { status: 200, body: { profiles: store.profiles() } };
   }
@@ -121,7 +128,7 @@ export const handleConsole = async (store: ConsoleStore, req: ConsoleRequest, no
   const one = path.match(/^\/api\/bots\/([^/]+)$/);
   if (method === 'GET' && one) return { status: 200, body: await store.one(decodeURIComponent(one[1]), nowMs) };
   if (method === 'POST' && path === '/api/bots') {
-    if (body.wallet !== 'create' && body.wallet !== 'import') {
+    if (body.wallet !== 'create' && body.wallet !== 'import' && body.wallet !== 'phrase') {
       throw new HttpError(400, 'wallet', 'Create a new wallet or import one.');
     }
     return {
@@ -129,6 +136,8 @@ export const handleConsole = async (store: ConsoleStore, req: ConsoleRequest, no
       body: await store.create({
         profile: String(body.profile || ''),
         wallet: body.wallet,
+        phrase: typeof body.phrase === 'string' ? body.phrase : undefined,
+        account: typeof body.account === 'number' ? body.account : undefined,
         signerKey: typeof body.signerKey === 'string' ? body.signerKey : undefined,
         signerAddress: typeof body.signerAddress === 'string' ? body.signerAddress : undefined,
         poolId: typeof body.poolId === 'string' ? body.poolId : undefined,

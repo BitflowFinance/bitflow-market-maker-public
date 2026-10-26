@@ -7,6 +7,7 @@ import { bookOf, humanReason, parseLogLine, validateSettings } from '../src/cons
 import { decimalToMicro } from '../src/console/money';
 import { handleConsole, RequestHeaders } from '../src/console/server';
 import { BridgeClient, BridgeInput, BridgeJob, ConsoleHost, ConsoleStore, HttpError, manualOutcome } from '../src/console/store';
+import { accountOf } from '../src/console/phrase';
 import { createWallet } from '../src/console/wallet';
 import { checkMemo, checkPayoutAddress, stxSweepAmount } from '../src/payout';
 
@@ -179,11 +180,14 @@ describe('local console', () => {
     expect(bot.needs.some((item) => item.id.endsWith(':nocheck'))).toBe(true);
   });
 
-  it('flags two bots that share a wallet', async () => {
-    const { call } = boot();
+  it('refuses a second bot on the same wallet, and flags two that share one anyway', async () => {
+    const { call, root } = boot();
     const wallet = createWallet();
     await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: wallet.key });
-    await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: wallet.key });
+    const second = await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: wallet.key });
+    expect(second.status).toBe(409);
+    // A hand-edited env file can still share one; the checklist catches that.
+    writeFileSync(join(root, '.env.stx'), `SIGNER_KEY=${wallet.key}\nSIGNER_ADDRESS=${wallet.address}\n`);
     const fleet = await call('GET', '/api/fleet');
     const bots = (fleet.body as { bots: Array<{ id: string; checklist: Array<{ id: string; ok: boolean }> }> }).bots;
     const real = bots.find((bot) => bot.id === 'sbtc');
@@ -496,7 +500,7 @@ describe('local console', () => {
     expect(statSync(join(root, '.env.stx')).mode & 0o777).toBe(0o600);
   });
 
-  it('shows a new key only to the page, and records the backup once the user proves they have it', async () => {
+  it('shows the app phrase only to the page, and records the backup once the user proves they have it', async () => {
     const { call } = boot();
     await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'create' });
     const before = (await call('GET', '/api/bots/sbtc')).body as { keyBackedUp: boolean; checklist: Array<{ id: string; ok: boolean }> };
@@ -509,17 +513,66 @@ describe('local console', () => {
     expect(unconfirmed.status).toBe(409);
     const shown = await call('POST', '/api/bots/sbtc/key-backup', { acknowledged: true }, PAGE);
     expect(shown.status).toBe(200);
-    const key = (shown.body as { key: string }).key;
-    expect(key).toMatch(/^[0-9a-f]{64}(01)?$/);
+    const backup = shown.body as { kind: string; phrase: string; account: number };
+    expect(backup.kind).toBe('phrase');
+    expect(backup.phrase.split(' ')).toHaveLength(24);
+    expect(backup.account).toBe(0);
+    const last = backup.phrase.split(' ').slice(-1)[0];
 
     expect((await call('POST', '/api/bots/sbtc/key-saved', { keyTail: 'zzzz' }, PAGE)).status).toBe(400);
-    expect((await call('POST', '/api/bots/sbtc/key-saved', { keyTail: key.slice(-4) })).status).toBe(403);
-    const saved = await call('POST', '/api/bots/sbtc/key-saved', { keyTail: key.slice(-4) }, PAGE);
+    expect((await call('POST', '/api/bots/sbtc/key-saved', { keyTail: last })).status).toBe(403);
+    const saved = await call('POST', '/api/bots/sbtc/key-saved', { keyTail: last }, PAGE);
     expect(saved.status).toBe(200);
-    const after = saved.body as { keyBackedUp: boolean; keyBackupAt: string | null };
-    expect(after.keyBackedUp).toBe(true);
-    expect(after.keyBackupAt).not.toBeNull();
-    expect(JSON.stringify((await call('GET', '/api/fleet')).body)).not.toContain(key);
+    expect((saved.body as { keyBackedUp: boolean }).keyBackedUp).toBe(true);
+    const fleet = JSON.stringify((await call('GET', '/api/fleet')).body);
+    expect(fleet).not.toContain(backup.phrase);
+    expect(fleet).not.toContain(backup.phrase.split(' ').slice(0, 3).join(' '));
+
+    // One saved phrase covers the next bot it makes, on the next account.
+    const second = (await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'create' })).body as { bot: { id: string; address: string; walletAccount: number; keyBackedUp: boolean }; backupNeeded: boolean };
+    expect(second.backupNeeded).toBe(false);
+    expect(second.bot.walletAccount).toBe(1);
+    expect(second.bot.keyBackedUp).toBe(true);
+    expect(second.bot.address).toBe(accountOf(backup.phrase, 1).address);
+    expect(second.bot.address).not.toBe(accountOf(backup.phrase, 0).address);
+  });
+
+  it('keeps the app phrase readable only by the user, and never overwrites one it cannot read', async () => {
+    const { call, root } = boot();
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'create' });
+    const file = join(root, '.mm-wallet');
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    const saved = readFileSync(file, 'utf8');
+    writeFileSync(file, 'not json');
+    const res = await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'create' });
+    expect(res.status).toBe(500);
+    expect(readFileSync(file, 'utf8')).toBe('not json');
+    expect(saved).not.toBe('not json');
+  });
+
+  it('imports a phrase account without storing the phrase, and refuses a wallet another bot uses', async () => {
+    const { call, root } = boot();
+    const phrase = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art';
+    expect((await call('POST', '/api/wallet/accounts', { phrase })).status).toBe(403);
+    expect((await call('POST', '/api/wallet/accounts', { phrase: 'not a phrase' }, PAGE)).status).toBe(400);
+
+    const res = await call('POST', '/api/bots', { profile: 'stx', wallet: 'phrase', phrase, account: 2 });
+    expect(res.status).toBe(200);
+    const bot = (res.body as { bot: { address: string; keySource: string; keyBackedUp: boolean; walletAccount: number }; backupNeeded: boolean });
+    expect(bot.bot.address).toBe(accountOf(phrase, 2).address);
+    expect(bot.bot.keySource).toBe('phrase');
+    expect(bot.bot.walletAccount).toBe(2);
+    expect(bot.backupNeeded).toBe(false);
+    expect(readFileSync(join(root, '.env.stx'), 'utf8')).not.toContain('abandon');
+    expect(existsSync(join(root, '.mm-wallet'))).toBe(false);
+
+    const again = await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'phrase', phrase, account: 2 });
+    expect(again.status).toBe(409);
+    expect((again.body as { error: string }).error).toBe('wallet_in_use');
+
+    const listed = (await call('POST', '/api/wallet/accounts', { phrase }, PAGE)).body as { accounts: Array<{ account: number; bot: string | null }> };
+    expect(listed.accounts.map((item) => item.account)).toEqual([0, 1, 2, 3, 4]);
+    expect(listed.accounts[2].bot).toBe('stx');
   });
 
   it('does not ask to back up an imported key', async () => {

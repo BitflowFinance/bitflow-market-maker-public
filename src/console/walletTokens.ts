@@ -27,9 +27,11 @@ export interface WalletRead {
 export interface WalletTokenReader {
   /** Last read of the wallet (or null), refreshing in the background. */
   peek(address: string): WalletRead | null;
+  /** Whether an address has ever sent a transaction; null when it cannot be told. */
+  hasHistory(address: string): Promise<boolean | null>;
 }
 
-export const noWalletTokens: WalletTokenReader = { peek: () => null };
+export const noWalletTokens: WalletTokenReader = { peek: () => null, hasHistory: () => Promise.resolve(null) };
 
 interface BffToken {
   contract_address: string;
@@ -99,6 +101,14 @@ export const liveWalletTokens = (): WalletTokenReader => {
           .finally(() => inflight.delete(address));
       }
       return hit || null;
+    },
+    hasHistory: async (address) => {
+      try {
+        const res = await getJson<{ last_executed_tx_nonce?: number | null; last_mempool_tx_nonce?: number | null }>(`${HIRO}/extended/v1/address/${address}/nonces`);
+        return res.last_executed_tx_nonce != null || res.last_mempool_tx_nonce != null;
+      } catch {
+        return null;
+      }
     },
   };
 };

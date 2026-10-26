@@ -8,25 +8,36 @@ import { Card, CopyButton, Empty, Icon, Modal, RiskConfirm, downloadFile, useToa
 const TAIL = 4;
 
 const downloadBackup = (backup: KeyBackupBody): void => {
+  const secret =
+    backup.kind === 'phrase'
+      ? [`Account:     ${backup.account + 1} (index ${backup.account})`, `Phrase:      ${backup.phrase}`]
+      : [`Private key: ${backup.key}`];
+  const restore =
+    backup.kind === 'phrase'
+      ? [
+          'This one phrase covers every bot this app made a wallet for; each bot uses its own account.',
+          'To restore: import the phrase into Leather or Xverse and open the matching account,',
+          `or put it back in ${backup.file}.`,
+        ]
+      : ['To restore: import the private key into a Stacks wallet that accepts private keys,', `or put it back as SIGNER_KEY in ${backup.file}.`];
   const text = [
     'Bitflow MM wallet backup',
     '',
     `Pool:        ${backup.pair}`,
     `Address:     ${backup.address}`,
-    `Private key: ${backup.key}`,
+    ...secret,
     `Saved:       ${new Date().toISOString()}`,
     '',
-    'Anyone with this key controls the wallet and everything in it.',
-    'Keep this file offline or in a password manager. Never paste the key into a chat or give it to an agent.',
+    `Anyone with this ${backup.kind === 'phrase' ? 'phrase' : 'key'} controls the wallet and everything in it.`,
+    'Keep this file offline or in a password manager. Never paste it into a chat or give it to an agent.',
     '',
-    'To restore: import the private key into a Stacks wallet that accepts private keys,',
-    `or put it back as SIGNER_KEY in ${backup.file}.`,
+    ...restore,
     '',
   ].join('\n');
-  downloadFile(`bitflow-mm-${backup.address.slice(-6)}-key.txt`, text, 'text/plain');
+  downloadFile(`bitflow-mm-${backup.address.slice(-6)}-${backup.kind}.txt`, text, 'text/plain');
 };
 
-/** Shows the key once, offers copy and download, then asks for the last characters to prove it was saved. */
+/** Shows the key (or the app's phrase) once, offers copy and download, then asks for proof it was saved. */
 export function KeyBackup({ bot, onDone }: { bot: BotView; onDone: () => void }) {
   const toast = useToast();
   const [ack, setAck] = useState(false);
@@ -67,9 +78,16 @@ export function KeyBackup({ bot, onDone }: { bot: BotView; onDone: () => void })
   if (!backup) {
     return (
       <div className="explain">
-        <p>
-          This app made the wallet, so the key exists only in <code>.env.{bot.profile}</code> on this computer. If that file is lost, so are the funds. Save a copy now.
-        </p>
+        {bot.keySource === 'app-phrase' ? (
+          <p>
+            This app made the wallet from its recovery phrase, which exists only in <code>.mm-wallet</code> on this computer. Every bot it made uses that phrase on its own
+            account, so one saved copy covers them all. If the file is lost, so are the funds.
+          </p>
+        ) : (
+          <p>
+            This app made the wallet, so the key exists only in <code>.env.{bot.profile}</code> on this computer. If that file is lost, so are the funds. Save a copy now.
+          </p>
+        )}
         <label className="check">
           <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
           <span>No one else can see my screen.</span>
@@ -78,27 +96,42 @@ export function KeyBackup({ bot, onDone }: { bot: BotView; onDone: () => void })
         <div>
           <button type="button" className="btn primary" disabled={!ack || busy} onClick={() => void show()}>
             <Icon name="eye" />
-            {busy ? 'Loading…' : 'Show key'}
+            {busy ? 'Loading…' : bot.keySource === 'app-phrase' ? 'Show phrase' : 'Show key'}
           </button>
         </div>
       </div>
     );
   }
 
+  const phrase = backup.kind === 'phrase';
+  const secret = phrase ? backup.phrase : backup.key;
+  const ready = phrase ? tail.trim().length > 0 : tail.trim().length === TAIL;
   return (
     <div className="explain">
       <div className="warnline">
         <Icon name="warn" />
-        <span>Anyone with this key controls the wallet. Keep it in a password manager or offline. Never paste it into a chat or give it to an agent.</span>
+        <span>
+          Anyone with this {phrase ? 'phrase' : 'key'} controls the wallet. Keep it in a password manager or offline. Never paste it into a chat or give it to an agent.
+        </span>
       </div>
       <div className="addrbox">
-        <div className="addrbox-k">Private key for {shortAddr(backup.address)}</div>
-        <div className="addrbox-v mono">{visible ? backup.key : '•'.repeat(32)}</div>
+        <div className="addrbox-k">
+          {phrase ? `Recovery phrase · this bot is account ${backup.account + 1} (${shortAddr(backup.address)})` : `Private key for ${shortAddr(backup.address)}`}
+        </div>
+        {phrase && visible ? (
+          <ol className="words mono">
+            {backup.phrase.split(' ').map((word, i) => (
+              <li key={i}>{word}</li>
+            ))}
+          </ol>
+        ) : (
+          <div className="addrbox-v mono">{visible ? secret : '•'.repeat(32)}</div>
+        )}
         <span className="keybtns">
           <button type="button" className="btn sm ghost" onClick={() => setVisible(!visible)}>
             {visible ? 'Hide' : 'Reveal'}
           </button>
-          <CopyButton text={backup.key} label="Copy" />
+          <CopyButton text={secret} label="Copy" />
           <button type="button" className="btn sm" onClick={() => downloadBackup(backup)}>
             <Icon name="wallet" />
             Download
@@ -106,12 +139,12 @@ export function KeyBackup({ bot, onDone }: { bot: BotView; onDone: () => void })
         </span>
       </div>
       <label className="field">
-        <span className="field-l">Type the last {TAIL} characters of the key you saved</span>
-        <input className="in mono" value={tail} onChange={(e) => setTail(e.target.value)} maxLength={TAIL} autoComplete="off" spellCheck={false} />
+        <span className="field-l">{phrase ? 'Type the last word of the phrase you saved' : `Type the last ${TAIL} characters of the key you saved`}</span>
+        <input className="in mono" value={tail} onChange={(e) => setTail(e.target.value)} maxLength={phrase ? 12 : TAIL} autoComplete="off" spellCheck={false} />
       </label>
       {error ? <p className="form-err">{error}</p> : null}
       <div>
-        <button type="button" className="btn primary" disabled={tail.trim().length !== TAIL || busy} onClick={() => void confirm()}>
+        <button type="button" className="btn primary" disabled={!ready || busy} onClick={() => void confirm()}>
           {busy ? 'Checking…' : 'I saved it'}
         </button>
       </div>
@@ -121,27 +154,33 @@ export function KeyBackup({ bot, onDone }: { bot: BotView; onDone: () => void })
 
 function KeyCard({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) {
   const [open, setOpen] = useState(false);
-  const imported = bot.keySource === 'import';
+  const imported = bot.keySource === 'import' || bot.keySource === 'phrase';
+  const appPhrase = bot.keySource === 'app-phrase';
+  const account = bot.walletAccount != null ? ` (account ${bot.walletAccount + 1})` : '';
   return (
     <Card
       title="Key backup"
       aside={bot.keyBackedUp ? <span className="tag t-good">{imported ? 'Imported' : 'Saved'}</span> : <span className="tag t-warn">Not saved</span>}
     >
       {imported ? (
-        <p className="muted">You imported this key, so you already have it.</p>
+        <p className="muted">
+          You imported this {bot.keySource === 'phrase' ? `recovery phrase${account}` : 'key'}, so you already have it.
+        </p>
       ) : bot.keyBackedUp ? (
-        <p className="muted">Saved {clock(bot.keyBackupAt)}.</p>
+        <p className="muted">{appPhrase ? `Uses the app's recovery phrase${account}, which you saved.` : `Saved ${clock(bot.keyBackupAt)}.`}</p>
       ) : (
-        <p>The key exists only on this computer. Save a copy before you fund the wallet.</p>
+        <p>
+          The {appPhrase ? `app's recovery phrase${account}` : 'key'} exists only on this computer. Save a copy before you fund the wallet.
+        </p>
       )}
       <div>
         <button type="button" className={bot.keyBackedUp ? 'btn' : 'btn primary'} onClick={() => setOpen(true)}>
           <Icon name="lock" />
-          {bot.keyBackedUp ? 'Show key again' : 'Back up key'}
+          {appPhrase ? (bot.keyBackedUp ? 'Show phrase again' : 'Back up phrase') : bot.keyBackedUp ? 'Show key again' : 'Back up key'}
         </button>
       </div>
       {open ? (
-        <Modal title="Back up the wallet key" onClose={() => setOpen(false)}>
+        <Modal title={appPhrase ? 'Back up the recovery phrase' : 'Back up the wallet key'} onClose={() => setOpen(false)}>
           <KeyBackup
             bot={bot}
             onDone={() => {
