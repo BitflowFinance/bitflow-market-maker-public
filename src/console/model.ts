@@ -1,4 +1,5 @@
 import { Insights } from './history';
+import { HeldToken } from './walletTokens';
 
 export interface TickLike {
   t: string;
@@ -202,6 +203,10 @@ export interface BotView {
   poolSwitch: PoolSwitchJob | null;
   /** Bins between the price and the nearer edge of this pool's range. */
   poolEdgeRoom: number | null;
+  /** Tokens in the wallet that this bot's pool doesn't use. */
+  strayTokens: HeldToken[];
+  /** Failed data reads in a row, against the count that halts the bot. Null when the last read worked. */
+  readFailures: { count: number; max: number } | null;
 }
 
 export interface BotRecord {
@@ -226,6 +231,7 @@ export interface BotRecord {
   startError?: string | null;
   cashOut?: CashOutJob | null;
   poolSwitch?: PoolSwitchJob | null;
+  strayTokens?: HeldToken[];
   insights?: Insights | null;
   /** 10^(base decimals - quote decimals): turns the tick's raw bin price into a human one. */
   priceScale?: number;
@@ -484,6 +490,17 @@ export const needsOf = (record: BotRecord, nowMs: number): NeedItem[] => {
   if (record.lastTick.decision === 'no_data') return [item('data', 'serious', 'can’t read data', reason.text)];
   const need = NEED_KINDS[reason.kind];
   if (need) return [item(reason.kind, need.tone, need.what, reason.text)];
+  const strays = record.strayTokens || [];
+  if (strays.length) {
+    return [
+      item(
+        'stray',
+        'warn',
+        'holds tokens it doesn’t trade',
+        `${strays.map((token) => token.symbol).join(', ')} in the wallet. Cash out sends ${strays.some((token) => !token.known) ? 'Bitflow-listed tokens' : 'them'} to your payout address.`,
+      ),
+    ];
+  }
   const room = edgeRoomOf(record);
   // Three curve widths leaves time to move before the curve no longer fits.
   if (room != null && room < curveWidthOf(record) * 3) {
@@ -679,6 +696,18 @@ const marketOf = (record: BotRecord): MarketView | null => {
   };
 };
 
+// The bot halts after this many failed reads in a row; the trailing run of
+// data-kind reasons in its history is the same count.
+const readFailuresOf = (record: BotRecord): { count: number; max: number } | null => {
+  let count = 0;
+  for (let i = record.history.length - 1; i >= 0; i -= 1) {
+    const tick = record.history[i];
+    if (humanReason(tick.reason, tick.decision).kind !== 'data') break;
+    count += 1;
+  }
+  return count ? { count, max: Number(num(record.env.MAX_CONSECUTIVE_API_ERRORS, '5')) } : null;
+};
+
 // Ticks carry unsigned bins (0..1000); the pool's range ends 500 bins either side of 500.
 const edgeRoomOf = (record: BotRecord): number | null => {
   const active = record.lastTick?.activeBinId;
@@ -775,6 +804,8 @@ export const toView = (record: BotRecord, sharedAddress: boolean, nowMs: number)
     cashOut: record.cashOut || null,
     poolSwitch: record.poolSwitch || null,
     poolEdgeRoom: edgeRoomOf(record),
+    strayTokens: record.strayTokens || [],
+    readFailures: readFailuresOf(record),
   };
 };
 

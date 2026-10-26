@@ -146,8 +146,9 @@ export class PreviewBook {
       const fromCenter = Math.abs(id - state.center);
       bars.push({
         id,
-        pool: 4 + 10 * Math.pow(0.82, fromActive) + ((id * 7) % 5) * 0.4,
-        ours: fromCenter <= half ? 5 * Math.pow(0.6, fromCenter) : 0,
+        // Quote-token value per bin, so the chart's tooltip reads as dollars like a real pool's.
+        pool: (4 + 10 * Math.pow(0.82, fromActive) + ((id * 7) % 5) * 0.4) * 100,
+        ours: fromCenter <= half ? 120 * Math.pow(0.6, fromCenter) : 0,
         active: id === active,
       });
     }

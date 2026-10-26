@@ -123,6 +123,8 @@ export interface BotView {
   cashOut: CashOutJob | null;
   poolSwitch: PoolSwitchJob | null;
   poolEdgeRoom: number | null;
+  strayTokens: Array<{ contract: string; symbol: string; amount: number; known: boolean }>;
+  readFailures: { count: number; max: number } | null;
 }
 
 export interface PoolOption {
@@ -199,6 +201,7 @@ export interface ProfileInfo {
   quoteSymbol: string;
   halfWidth: number;
   taken: boolean;
+  blurb: string;
   suggest: { base: string; quote: string; gas: string; note: string };
 }
 

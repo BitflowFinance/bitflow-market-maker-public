@@ -4,6 +4,7 @@ import { BotView, ProfileInfo, api } from './api';
 import type { Shared } from './App';
 import { poolName, tok } from './format';
 import { PoolList, usePoolCatalog } from './PoolList';
+import { QrCode } from './QrCode';
 import { Card, CopyButton, Icon, Seg, useToast } from './ui';
 import { KeyBackup } from './WalletTab';
 
@@ -109,9 +110,7 @@ export function CreatePage({ fleet, reload }: Shared) {
                   <span className="po-h">
                     <b>{item.pair}</b>
                   </span>
-                  <span className="po-b">
-                    ~{item.suggest.base} {item.baseSymbol} + {item.suggest.quote} {item.quoteSymbol} to start
-                  </span>
+                  <span className="po-b">{item.blurb}</span>
                 </>
               );
               return item.taken ? (
@@ -252,10 +251,15 @@ export function CreatePage({ fleet, reload }: Shared) {
         <>
           <Card title="Fund the wallet">
             {created?.startError ? <p className="form-err">{created.startError}</p> : null}
+            <p className="muted">Send tokens to this bot's wallet from any Stacks wallet. Any amount works; the table suggests a start that lets the bot place liquidity on both sides.</p>
             {created?.address ? (
-              <div className="addrbox">
-                <div className="addrbox-v mono">{created.address}</div>
-                <CopyButton text={created.address} label="Copy" />
+              <div className="fundaddr">
+                <QrCode text={created.address} />
+                <div className="addrbox">
+                  <div className="addrbox-k">Bot wallet address</div>
+                  <div className="addrbox-v mono">{created.address}</div>
+                  <CopyButton text={created.address} label="Copy" />
+                </div>
               </div>
             ) : (
               <p className="muted">Loading address…</p>

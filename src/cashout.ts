@@ -15,6 +15,7 @@ import {
   standardPrincipalCV,
   uintCV,
 } from '@stacks/transactions';
+import { fetchTokens } from './bitflow';
 import { CONFIG } from './config';
 import { broadcastLiquidity, prepareWithdrawLiquidity } from './liquidity';
 import { logError, logInfo, logWarn } from './logger';
@@ -46,6 +47,23 @@ const poolTokens = (): PoolToken[] =>
     { symbol: 'quote', contract: CONFIG.QUOTE_TOKEN_CONTRACT, assetName: CONFIG.QUOTE_ASSET_NAME, decimals: CONFIG.QUOTE_DECIMALS },
     // The STX wrapper side is paid out as native STX in the final sweep.
   ].filter((token) => token.contract !== CONFIG.STX_TOKEN_CONTRACT);
+
+// Tokens sent to the wallet by mistake (sBTC in the STX bot). Only tokens Bitflow
+// lists are sent: those are SIP-010 with the standard transfer, whereas pool share
+// tokens or unknown contracts could reject it and waste the fee.
+const strayTokens = async (signer: string): Promise<PoolToken[]> => {
+  const skip = new Set([CONFIG.BASE_TOKEN_CONTRACT, CONFIG.QUOTE_TOKEN_CONTRACT, CONFIG.STX_TOKEN_CONTRACT]);
+  const [balances, listed] = await Promise.all([getAccountBalances(signer), fetchTokens().then((res) => res.tokens).catch(() => [])]);
+  const byContract = new Map(listed.map((token) => [token.contract_address, token]));
+  const out: PoolToken[] = [];
+  for (const [id, entry] of Object.entries(balances.tokens)) {
+    const [contract, assetName] = id.split('::');
+    const token = byContract.get(contract);
+    if (skip.has(contract) || !token || !assetName || entry.balance <= BigInt(0)) continue;
+    out.push({ symbol: token.symbol, contract, assetName, decimals: token.decimals });
+  }
+  return out;
+};
 
 // A pending or missing nonce means another transaction from this wallet is in
 // flight; sending now would queue behind it or collide, so stop and let the
@@ -170,10 +188,13 @@ export const runCashOut = async (to: string, memo: string): Promise<boolean> => 
     logInfo(`[${TAG}] start from=${signer} to=${to} pool="${CONFIG.POOL_ID}" memo=${memo ? 'set' : 'none'}`);
     await withdrawAll(signer);
     for (const token of poolTokens()) await sendToken(token, signer, to, memo);
+    // Before the STX sweep, which leaves nothing for further fees.
+    const extras = await strayTokens(signer);
+    for (const token of extras) await sendToken(token, signer, to, memo);
     await sweepStx(signer, to, memo);
 
     const left = await getAccountBalances(signer);
-    const tokensLeft = poolTokens().filter(
+    const tokensLeft = [...poolTokens(), ...extras].filter(
       (token) => (left.tokens[`${token.contract}::${token.assetName}`]?.balance ?? BigInt(0)) > BigInt(0),
     );
     if (tokensLeft.length) {

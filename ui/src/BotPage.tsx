@@ -216,11 +216,12 @@ function StatusLine({ bot, now }: { bot: BotView; now: number }) {
   const text = statusText(bot);
   const tone = bot.startError ? 'serious' : bot.state.tone;
   const next = bot.running && !bot.paused && bot.lastCheckAt ? countdown(new Date(bot.lastCheckAt).getTime() + bot.tickIntervalMs, now) : null;
-  const checked = bot.lastCheckAt ? `${bot.running ? 'Checked' : 'Last check'} ${ago(bot.lastCheckAt, now)}` : bot.running ? 'Starting…' : '';
+  const checked = bot.lastCheckAt ? `${bot.running ? 'checked' : 'last check'} ${ago(bot.lastCheckAt, now)}` : bot.running ? 'starting…' : '';
   const when = bot.running && !bot.paused && bot.lastCheckAt ? `${checked} · ${next ? `next in ${next}` : 'checking…'}` : checked;
   const chips: string[] = [];
   if (bot.running && bot.wouldSend && !bot.preview && bot.mode === 'dry_run') chips.push('Would trade if live');
-  if (bot.holdingsCarried && bot.holdingsAsOf) chips.push(`Balances as of ${ago(bot.holdingsAsOf, now)}`);
+  if (bot.readFailures) chips.push(`${bot.readFailures.count} failed read${bot.readFailures.count === 1 ? '' : 's'} in a row · halts at ${bot.readFailures.max}`);
+  if (bot.holdingsCarried && bot.holdingsAsOf) chips.push(`Balances from the last good read, ${ago(bot.holdingsAsOf, now)}`);
   return (
     <section className={`statusline t-${tone}`}>
       <Dot tone={tone} />
@@ -1151,6 +1152,20 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
   const [yAmount, setYAmount] = useState('');
   const [withdrawPct, setWithdrawPct] = useState('100');
 
+  const [pausing, setPausing] = useState(false);
+  const pause = async () => {
+    setPausing(true);
+    try {
+      await api(`/api/bots/${encodeURIComponent(bot.id)}/pause`, 'POST', {});
+      toast('good', 'Paused.');
+      await reload();
+    } catch (err) {
+      toast('bad', err instanceof Error ? err.message : 'Could not pause.');
+    } finally {
+      setPausing(false);
+    }
+  };
+
   // Every action needs the same conditions, so one reason covers all three cards.
   const shared = bot.preview ? 'Not available in previews.' : bot.mode !== 'live' ? 'Only available when live.' : !bot.paused ? 'Pause the bot first.' : '';
 
@@ -1175,18 +1190,40 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
     }
   };
 
-  const items: Array<{ kind: ManualKind; title: string; body: string; icon: 'arrow' | 'plus' | 'wallet' }> = [
-    { kind: 'swap', title: 'Swap', body: `${bot.baseSymbol} ↔ ${bot.quoteSymbol}`, icon: 'arrow' },
-    { kind: 'add', title: 'Add liquidity', body: 'Wallet → pool', icon: 'plus' },
-    { kind: 'withdraw', title: 'Withdraw', body: 'Pool → wallet', icon: 'wallet' },
+  const wallet = `${tok(bot.walletBase, bot.baseSymbol)} · ${tok(bot.walletQuote, bot.quoteSymbol)}`;
+  const items: Array<{ kind: ManualKind; title: string; body: string; detail: string; icon: 'arrow' | 'plus' | 'wallet' }> = [
+    { kind: 'swap', title: 'Swap', body: `Trade ${bot.baseSymbol} for ${bot.quoteSymbol}, or back, in this pool.`, detail: `Wallet: ${wallet}`, icon: 'arrow' },
+    { kind: 'add', title: 'Add liquidity', body: 'Move tokens from the wallet into the pool.', detail: `Wallet: ${wallet}`, icon: 'plus' },
+    { kind: 'withdraw', title: 'Withdraw', body: 'Move liquidity from the pool back to the wallet.', detail: `In pool: ${usd(bot.inPoolValue)}`, icon: 'wallet' },
   ];
 
   return (
     <div className="stack">
-      <div className={`banner2 ${shared ? 'info' : 'warn'}`}>
-        <Icon name={shared ? 'lock' : 'warn'} />
-        <div>{shared || 'Uses real funds right away.'}</div>
-      </div>
+      {!bot.preview && bot.mode === 'live' && !bot.paused ? (
+        <div className="banner2 warn">
+          <Icon name="pause" />
+          <div className="grow">Pause the bot first, so its next check doesn't undo a manual action. Liquidity stays in the pool while it's paused.</div>
+          <button type="button" className="btn sm" disabled={pausing} onClick={() => void pause()}>
+            <Icon name="pause" />
+            {pausing ? 'Pausing…' : 'Pause bot'}
+          </button>
+        </div>
+      ) : (
+        <div className={`banner2 ${shared ? 'info' : 'warn'}`}>
+          <Icon name={shared ? 'lock' : 'warn'} />
+          <div className="grow">
+            {bot.preview ? (
+              'Previews have no wallet, so there is nothing to move.'
+            ) : bot.mode !== 'live' ? (
+              <>
+                Manual actions move real funds, so they're off in dry run. <Link to="?tab=settings">Go live in Settings</Link> to use them.
+              </>
+            ) : (
+              'The bot is paused. These send a transaction from the bot wallet right away.'
+            )}
+          </div>
+        </div>
+      )}
       <div className="cards three">
         {items.map((item) => {
           const why = shared;
@@ -1208,6 +1245,7 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
               <span>
                 <b>{item.title}</b>
                 <small>{item.body}</small>
+                <small className="mcard-d">{item.detail}</small>
               </span>
             </button>
           );

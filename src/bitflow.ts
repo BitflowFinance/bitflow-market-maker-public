@@ -266,13 +266,32 @@ interface CurrentBinsResponse {
   errorCode?: string;
 }
 
-// A wallet that has never sent a transaction cannot have added liquidity, so
-// "no position registered" is safe to read as an empty book for it -- and only
-// for it. Every new bot wallet is in this state on its first tick.
-const walletHasNeverSent = async (address: string): Promise<boolean> => {
+// Liquidity reaches a wallet only through an add or a move it sends itself, so a
+// wallet that never sent one cannot hold a position, and "no position registered"
+// is safe to read as an empty book for it. Swaps and transfers (a de-risk sell, a
+// funding round trip) don't count. A pending transaction, an unreadable history,
+// or one too long to scan all mean the position is unknown.
+const HISTORY_SCAN_MAX = 200;
+const createsPosition = (fn: string): boolean => /liquidity/.test(fn) && /(add|move)/.test(fn);
+
+export const walletNeverAddedLiquidity = async (address: string): Promise<boolean> => {
   try {
-    const nonces = await getNonceInfo(address);
-    return nonces.nextNonce === 0 && !nonces.mempoolPending;
+    if ((await getNonceInfo(address)).mempoolPending) return false;
+    const api = (CONFIG.STACKS_NODE_URL || 'https://api.hiro.so').replace(/\/$/, '');
+    for (let offset = 0; offset < HISTORY_SCAN_MAX; offset += 50) {
+      const page = await fetchJson<{
+        total?: number;
+        results?: Array<{ sender_address?: string; tx_type?: string; contract_call?: { function_name?: string } }>;
+      }>(`${api}/extended/v1/address/${address}/transactions?limit=50&offset=${offset}`, CONFIG.STACKS_NODE_KEY);
+      const results = page.results || [];
+      const added = results.some(
+        (tx) => tx.sender_address === address && tx.tx_type === 'contract_call' && createsPosition(tx.contract_call?.function_name || ''),
+      );
+      if (added) return false;
+      const total = page.total ?? 0;
+      if (offset + results.length >= total) return true;
+    }
+    return false;
   } catch {
     return false;
   }
@@ -288,7 +307,7 @@ const readCurrentBins = async (url: string, address: string): Promise<CurrentBin
     // so read the code once more before deciding.
     const res = await fetch(url, { headers: CONFIG.BFF_API_KEY ? { 'X-API-Key': CONFIG.BFF_API_KEY } : {} });
     const body = (await res.json().catch(() => ({}))) as CurrentBinsResponse;
-    if (body.errorCode === 'NODE_POSITION_NOT_REGISTERED' && (await walletHasNeverSent(address))) return null;
+    if (body.errorCode === 'NODE_POSITION_NOT_REGISTERED' && (await walletNeverAddedLiquidity(address))) return null;
     throw new Error(`${(err as Error).message} code="${body.errorCode || ''}"`);
   }
 };
@@ -297,7 +316,7 @@ const fetchUserBinsV2 = async (poolId: string, address: string): Promise<UserBin
   const url = `${base()}/app/v2/users/${address}/positions/${poolId}/current-bins`;
   const res = await readCurrentBins(url, address);
   if (!res) {
-    logDebug('[bitflow] no user bins: this wallet has never sent a transaction');
+    logDebug('[bitflow] no user bins: this wallet has never added liquidity');
     return [];
   }
   if (res.errorCode === 'POOL_NOT_FOUND') {

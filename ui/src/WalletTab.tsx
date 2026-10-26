@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { BotView, KeyBackup as KeyBackupBody, api, explorerAddress, explorerTx } from './api';
 import { clock, shortAddr, tok } from './format';
 import { Link } from 'react-router-dom';
+import { QrCode } from './QrCode';
 import { Card, CopyButton, Empty, Icon, Modal, RiskConfirm, downloadFile, useToast } from './ui';
 
 const TAIL = 4;
@@ -365,9 +366,12 @@ export function WalletTab({ bot, reload }: { bot: BotView; reload: () => Promise
     <div className="grid2">
       <Card title="Bot wallet">
         {bot.address ? (
-          <div className="addrbox">
-            <div className="addrbox-v mono">{bot.address}</div>
-            <CopyButton text={bot.address} label="Copy" />
+          <div className="fundaddr">
+            <QrCode text={bot.address} size={120} />
+            <div className="addrbox">
+              <div className="addrbox-v mono">{bot.address}</div>
+              <CopyButton text={bot.address} label="Copy" />
+            </div>
           </div>
         ) : null}
         <dl className="facts">
@@ -387,6 +391,25 @@ export function WalletTab({ bot, reload }: { bot: BotView; reload: () => Promise
         {bot.lastCheckAt ? <p className="note">As of {clock(bot.holdingsAsOf)}.</p> : <p className="note">Balances show after the bot's first check.</p>}
       </Card>
       <KeyCard bot={bot} reload={reload} />
+      {bot.strayTokens.length ? (
+        <Card title="Other tokens in this wallet" className="span2" aside={<span className="tag t-warn">Not traded</span>}>
+          <p className="muted">
+            This bot only trades {bot.baseSymbol} and {bot.quoteSymbol}. These were probably sent here by mistake. Cash out sends the ones Bitflow lists to your
+            payout address; any others need a wallet app that can import this bot's key.
+          </p>
+          <dl className="facts">
+            {bot.strayTokens.map((token) => (
+              <div key={token.contract} className="fact-row">
+                <dt title={token.contract}>{token.symbol}</dt>
+                <dd className="num">
+                  {token.known ? tok(token.amount, token.symbol) : `${token.amount} (raw units)`}
+                  {token.known ? null : <span className="muted"> · not listed on Bitflow</span>}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </Card>
+      ) : null}
       <PayoutCard bot={bot} reload={reload} />
       <CashOutCard bot={bot} reload={reload} />
     </div>

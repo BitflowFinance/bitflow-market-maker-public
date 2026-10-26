@@ -309,19 +309,36 @@ describe('a wallet with no position yet', () => {
     json: async () => ({ errorCode: 'NODE_POSITION_NOT_REGISTERED' }),
   };
 
-  it('reads "position not registered" as empty only for a wallet that has never sent a transaction', async () => {
+  const nonces = { possible_next_nonce: 1, last_executed_tx_nonce: 0, last_mempool_tx_nonce: null };
+  const history = (functions: string[], sender = SIGNER) => ({
+    total: functions.length + 1,
+    results: [
+      ...functions.map((fn) => ({ sender_address: sender, tx_type: 'contract_call', contract_call: { function_name: fn } })),
+      // The funding transfer arrives from someone else and never counts.
+      { sender_address: 'SP000000000000000000002Q6VF78', tx_type: 'token_transfer' },
+    ],
+  });
+
+  it('reads "position not registered" as empty for a wallet that has only swapped or been funded', async () => {
     CONFIG.BFF_API_VERSION = 'v2';
     vi.stubGlobal(
       'fetch',
-      route({ '/current-bins': notRegistered, '/nonces': { possible_next_nonce: 0, last_executed_tx_nonce: null, last_mempool_tx_nonce: null } }),
+      route({ '/current-bins': notRegistered, '/nonces': nonces, '/transactions': history(['swap-x-for-y-simple-range-multi']) }),
     );
     await expect(fetchUserBins(POOL, SIGNER)).resolves.toEqual([]);
+  });
 
-    // A wallet that has sent transactions may well own liquidity the engine has
-    // not indexed; reading that as empty would invite a redeploy on top of it.
+  it('keeps "position not registered" an error once the wallet has added or moved liquidity, or has a pending tx', async () => {
+    CONFIG.BFF_API_VERSION = 'v2';
+    // The engine may simply not have indexed that position yet; reading it as
+    // empty would invite a redeploy on top of liquidity the wallet owns.
+    for (const fn of ['add-relative-liquidity-same-multi', 'add-liquidity-multi', 'move-relative-liquidity-multi']) {
+      vi.stubGlobal('fetch', route({ '/current-bins': notRegistered, '/nonces': nonces, '/transactions': history([fn]) }));
+      await expect(fetchUserBins(POOL, SIGNER)).rejects.toThrow(/NODE_POSITION_NOT_REGISTERED/);
+    }
     vi.stubGlobal(
       'fetch',
-      route({ '/current-bins': notRegistered, '/nonces': { possible_next_nonce: 4, last_executed_tx_nonce: 3, last_mempool_tx_nonce: null } }),
+      route({ '/current-bins': notRegistered, '/nonces': { ...nonces, last_mempool_tx_nonce: 1 }, '/transactions': history([]) }),
     );
     await expect(fetchUserBins(POOL, SIGNER)).rejects.toThrow(/NODE_POSITION_NOT_REGISTERED/);
   });

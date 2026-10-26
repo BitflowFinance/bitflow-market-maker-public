@@ -21,6 +21,8 @@ export interface PoolProfile {
   metricsPort: number;
   halfWidth: number;
   sizeFraction: string;
+  /** One line on what this pair is, shown when picking a pair. */
+  blurb: string;
   suggest: { base: string; quote: string; gas: string; note: string };
 }
 
@@ -41,6 +43,7 @@ export const PROFILES: Record<string, PoolProfile> = {
     quoteDecimals: 6,
     metricsPort: 8081,
     halfWidth: 6,
+    blurb: 'Bitcoin against dollars. Earns trading fees as sBTC moves; STX in the wallet pays the network fees.',
     sizeFraction: '0.45',
     suggest: {
       base: '0.005',
@@ -68,6 +71,7 @@ export const PROFILES: Record<string, PoolProfile> = {
     quoteDecimals: 6,
     metricsPort: 8082,
     halfWidth: 13,
+    blurb: 'STX against dollars. Earns trading fees as STX moves; STX is also the fee token, so no extra token is needed.',
     sizeFraction: '0.35',
     suggest: {
       base: '250',

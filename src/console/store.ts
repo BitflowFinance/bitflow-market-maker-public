@@ -33,6 +33,7 @@ import { decimalToMicro } from './money';
 import { HistoryFile, Range, insightsOf, lastTradeOf, pointOf, seriesOf } from './history';
 import { PoolDepthReader, noPoolDepth } from './poolDepth';
 import { PoolCatalog, PoolCatalogReader, noPoolCatalog } from './pools';
+import { WalletTokenReader, noWalletTokens } from './walletTokens';
 import { PreviewBook } from './preview';
 import { PROFILE_IDS, PROFILES, profileById } from './profiles';
 
@@ -178,6 +179,7 @@ export class ConsoleStore {
 
   depth: PoolDepthReader;
   pools: PoolCatalogReader;
+  walletTokens: WalletTokenReader;
   /** Pause between checks while confirming a pool change; tests swap in an instant one. */
   wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
   private histories = new Map<string, HistoryFile>();
@@ -190,7 +192,9 @@ export class ConsoleStore {
     nowMs: number,
     depth: PoolDepthReader = noPoolDepth,
     pools: PoolCatalogReader = noPoolCatalog,
+    walletTokens: WalletTokenReader = noWalletTokens,
   ) {
+    this.walletTokens = walletTokens;
     this.root = root;
     this.host = host;
     this.bridge = bridge;
@@ -268,6 +272,7 @@ export class ConsoleStore {
     quoteSymbol: string;
     halfWidth: number;
     taken: boolean;
+    blurb: string;
     suggest: Profile['suggest'];
   }[] {
     return PROFILE_IDS.map((id) => {
@@ -280,6 +285,7 @@ export class ConsoleStore {
         quoteSymbol: profile.quoteSymbol,
         halfWidth: profile.halfWidth,
         taken: existsSync(this.envPath(id)),
+        blurb: profile.blurb,
         suggest: profile.suggest,
       };
     });
@@ -808,6 +814,9 @@ export class ConsoleStore {
       startError: running ? null : this.startErrors.get(profile.id) || null,
       cashOut: this.cashOuts.get(profile.id) || null,
       poolSwitch: this.poolSwitches.get(profile.id) || null,
+      strayTokens: address
+        ? (this.walletTokens.peek(address) || []).filter((token) => token.contract !== profile.baseContract && token.contract !== profile.quoteContract)
+        : [],
       insights: insightsOf(file.points, file.lastTrade, Date.now()),
       priceScale: Math.pow(10, profile.baseDecimals - profile.quoteDecimals),
     };

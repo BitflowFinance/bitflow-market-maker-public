@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { HistoryFile, insightsOf, pointOf, seriesOf } from '../src/console/history';
 import { TickLike, toView } from '../src/console/model';
 import { barsFromLadder } from '../src/console/poolDepth';
+import { heldTokensOf } from '../src/console/walletTokens';
 import { handleConsole } from '../src/console/server';
 import { ConsoleHost, ConsoleStore } from '../src/console/store';
 import { createWallet } from '../src/console/wallet';
@@ -141,6 +142,36 @@ describe('overview fields', () => {
     expect(view.price).toBeCloseTo(79_958, 0);
     expect(view.market?.poolPrice).toBeCloseTo(79_958, 0);
     expect(view.inPoolValue).toBeCloseTo(500 + 799.58, 0);
+  });
+
+  it('flags tokens the pool does not use, and counts failed reads in a row', () => {
+    const stray = { ...record({}), strayTokens: [{ contract: 'SM3.sbtc-token', symbol: 'sBTC', amount: 0.001, known: true }] };
+    const view = toView(stray, false, NOW);
+    expect(view.strayTokens.length).toBe(1);
+    expect(view.needs.map((need) => need.id)).toEqual(['sbtc:stray']);
+
+    const failing = {
+      ...record({ decision: 'frozen', reason: 'snapshot_fetch_failed: 503' }),
+      env: { KEY_SOURCE: 'import', MAX_CONSECUTIVE_API_ERRORS: '5' },
+      history: [tick(8), tick(6, { decision: 'frozen', reason: 'snapshot_fetch_failed: 503' }), tick(4, { decision: 'frozen', reason: 'snapshot_fetch_failed: 503' })],
+    };
+    expect(toView(failing, false, NOW).readFailures).toEqual({ count: 2, max: 5 });
+    expect(toView(record({}), false, NOW).readFailures).toBeNull();
+  });
+
+  it('labels wallet tokens from Bitflow’s list and drops empty ones', () => {
+    const held = heldTokensOf(
+      {
+        'SM3.sbtc-token::sbtc-token': { balance: '100000' },
+        'SP1.mystery::mystery': { balance: '42' },
+        'SP120.usdcx::usdcx-token': { balance: '0' },
+      },
+      [{ contract_address: 'SM3.sbtc-token', symbol: 'sBTC', decimals: 8 }],
+    );
+    expect(held).toEqual([
+      { contract: 'SM3.sbtc-token', symbol: 'sBTC', amount: 0.001, known: true },
+      { contract: 'SP1.mystery', symbol: 'mystery', amount: 42, known: false },
+    ]);
   });
 
   it('reads the market gap and inventory bands from the strategy', () => {

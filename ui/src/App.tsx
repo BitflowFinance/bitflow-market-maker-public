@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
-import { BotView, Fleet, api } from './api';
+import { BotView, Fleet, Tone, api } from './api';
 import { BotPage } from './BotPage';
 import { CreatePage } from './CreatePage';
 import { HomePage } from './HomePage';
@@ -108,6 +108,12 @@ function Shell({
   const running = real.filter((bot) => bot.running);
   const newest = running.reduce<string | null>((acc, bot) => (bot.lastCheckAt && (!acc || bot.lastCheckAt > acc) ? bot.lastCheckAt : acc), null);
   const connLabel = !running.length ? '' : newest ? `Checked ${ago(newest, now)}` : 'Starting';
+  // The chip takes the worst state among running bots, so a failing read can't hide behind a recent check.
+  const RANK: Record<Tone, number> = { good: 0, info: 1, unknown: 2, warn: 3, serious: 4 };
+  const connTone = running.reduce<Tone>((worst, bot) => (RANK[bot.state.tone] > RANK[worst] ? bot.state.tone : worst), 'good');
+  const connTitle = running
+    .map((bot) => `${bot.pair}: ${bot.state.label.toLowerCase()}, checked ${ago(bot.lastCheckAt, now)}${bot.reason ? `. ${bot.reason.text}` : ''}`)
+    .join('\n');
   const needCount = fleet.needs.length;
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -127,8 +133,8 @@ function Shell({
             Offline
           </span>
         ) : connLabel ? (
-          <span className="conn">
-            <Dot tone="good" />
+          <span className={`conn t-${connTone}`} title={connTitle}>
+            <Dot tone={connTone} />
             {connLabel}
           </span>
         ) : null}
@@ -160,14 +166,14 @@ function Shell({
       </nav>
       <main className="main2">
         {offline ? (
-          <div className="banner2 serious">
+          <div className="page-top banner2 serious">
             <Icon name="warn" />
             <div>
               <b>Offline.</b> Showing the last numbers. Is <code>npm run ui</code> still running?
             </div>
           </div>
         ) : real.some((bot) => bot.mode === 'live' && bot.running) ? (
-          <div className="banner2 info">
+          <div className="page-top banner2 info">
             <Icon name="info" />
             <div>
               <b>Keep this running.</b> Live bots stop when <code>npm run ui</code> stops: closing its terminal, restarting, or letting the computer sleep all stop them.

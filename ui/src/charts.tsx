@@ -182,9 +182,10 @@ export function BinChart({ bins, havePoolDepth, height = 190 }: { bins: BinBar[]
         ) : null}
       </svg>
       {hovered ? (
-        <div className="ctip" style={{ left: Math.min(width - 150, Math.max(0, (hover as number) * bw - 60)) }}>
-          Bin {hovered.id} · {hovered.active ? 'current price' : `${(hover as number) - activeIndex > 0 ? '+' : ''}${(hover as number) - activeIndex} from price`}
-          {hovered.ours > 0 ? ' · yours' : ''}
+        <div className="ctip" style={{ left: Math.min(width - 260, Math.max(0, (hover as number) * bw - 90)) }}>
+          <b>{hovered.active ? 'Current price' : `${(hover as number) - activeIndex > 0 ? '+' : ''}${(hover as number) - activeIndex} bins from price`}</b>
+          {havePoolDepth ? <> · Pool {usd(hovered.pool)}</> : null}
+          {hovered.ours > 0 ? <> · Yours {havePoolDepth ? usd(hovered.ours) : 'in this bin'}</> : null}
         </div>
       ) : null}
     </div>

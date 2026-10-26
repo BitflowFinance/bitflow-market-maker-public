@@ -178,7 +178,11 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
   useEffect(() => {
     const dlg = ref.current;
     if (dlg && !dlg.open) dlg.showModal();
+    // A modal dialog does not stop the page behind it from scrolling.
+    const before = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     return () => {
+      document.body.style.overflow = before;
       if (dlg && dlg.open) dlg.close();
     };
   }, []);

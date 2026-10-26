@@ -5,6 +5,7 @@ import { liveBridgeClient } from './bridgeLive';
 import { processHost } from './host';
 import { livePoolDepth } from './poolDepth';
 import { livePoolCatalog } from './pools';
+import { liveWalletTokens } from './walletTokens';
 import { listenConsole } from './server';
 import { ConsoleStore } from './store';
 
@@ -24,7 +25,7 @@ const main = async (): Promise<void> => {
     });
   }
 
-  const store = new ConsoleStore(root, processHost(root), liveBridgeClient(), Date.now(), livePoolDepth(), livePoolCatalog());
+  const store = new ConsoleStore(root, processHost(root), liveBridgeClient(), Date.now(), livePoolDepth(), livePoolCatalog(), liveWalletTokens());
   await listenConsole(store, apiPort);
 
   const vite = spawn('npm', ['run', 'dev', '--prefix', 'ui', '--', '--port', String(pagePort), '--strictPort', '--host', '127.0.0.1'], {
