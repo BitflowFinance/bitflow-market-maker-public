@@ -559,7 +559,9 @@ describe('local console', () => {
     writeFileSync(file, JSON.stringify({ phrase: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art', backedUpAt: new Date().toISOString() }));
     const shown = (await call('POST', '/api/bots/stx/key-backup', { acknowledged: true }, PAGE)).body as { kind: string };
     expect(shown.kind).toBe('key');
-    expect(((await call('GET', '/api/bots/stx')).body as { keyBackedUp: boolean }).keyBackedUp).toBe(false);
+    const mismatched = (await call('GET', '/api/bots/stx')).body as { keyBackedUp: boolean; keySource: string };
+    expect(mismatched.keyBackedUp).toBe(false);
+    expect(mismatched.keySource).toBe('create');
 
     rmSync(file);
     expect(((await call('GET', '/api/wallet')).body as { problem: string | null }).problem).toContain('.mm-wallet');

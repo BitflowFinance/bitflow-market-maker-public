@@ -228,6 +228,8 @@ export interface BotRecord {
   name?: string | null;
   /** Whether the app's own phrase has been backed up (for bots whose key comes from it). */
   phraseBackedUp?: boolean;
+  /** False when an app-phrase bot's .mm-wallet no longer derives its address; it is then shown and backed up as a plain key. */
+  phraseOk?: boolean;
   preview: boolean;
   pair: string;
   poolId: string;
@@ -856,7 +858,12 @@ export const toView = (record: BotRecord, sharedAddress: boolean, nowMs: number)
     logs: record.logs,
     settings: publicSettings(record.env),
     startError: record.startError || null,
-    keySource: ['create', 'import', 'phrase', 'app-phrase'].indexOf(record.env.KEY_SOURCE) >= 0 ? (record.env.KEY_SOURCE as BotView['keySource']) : null,
+    keySource:
+      record.env.KEY_SOURCE === 'app-phrase' && !record.phraseOk
+        ? 'create'
+        : ['create', 'import', 'phrase', 'app-phrase'].indexOf(record.env.KEY_SOURCE) >= 0
+          ? (record.env.KEY_SOURCE as BotView['keySource'])
+          : null,
     walletAccount: record.env.WALLET_ACCOUNT ? Number(record.env.WALLET_ACCOUNT) : null,
     keyBackedUp: record.keySet && keyBackedUp(record),
     keyBackupAt: record.env.KEY_BACKUP_AT || null,

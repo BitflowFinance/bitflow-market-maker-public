@@ -98,7 +98,7 @@ What you need before `npm install`. Facts only; how much to fund is your decisio
 
 1. **Node.js 20 or newer.**
 2. **A dedicated Stacks account.** Create a fresh account in a Stacks wallet (Leather, Xverse or similar) and use it only for this bot. Never point the bot at a wallet that holds anything else. Its `SP...` address is `SIGNER_ADDRESS`.
-3. **Its private key as hex** for `SIGNER_KEY`. Some wallet apps can show or copy an account's private key directly. If yours only shows the seed phrase, derive the key on a machine that is offline and never paste the seed phrase anywhere else:
+3. **Its private key as hex** for `SIGNER_KEY`. Some wallet apps can show or copy an account's private key directly. If yours only shows the seed phrase, the page's **Recovery phrase** option derives the account's key for you and stores only that key. For the command line, derive it on a machine that is offline and never paste the seed phrase anywhere else:
 
    ```bash
    npm install --no-save @stacks/wallet-sdk

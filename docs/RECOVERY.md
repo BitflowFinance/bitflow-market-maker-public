@@ -65,3 +65,11 @@ npm run tick -- --pool sbtc
 3. Start again. The bot reads your on-chain bins on every tick: if they are in range it holds, if they have drifted it withdraws and rebuilds. It does not add a second curve on top of the first unless `ENABLE_WITHDRAW_LIQUIDITY=false`.
 
 If the start fails with `EADDRINUSE` on the metrics port, the previous process is still alive. Find and kill it before starting again. One process per pool, one wallet per process.
+
+## 6. Lost wallet files
+
+Each bot's key is `SIGNER_KEY` in its `.env.<bot>` file. Wallets the page created also come from the phrase in `.mm-wallet`, at account `WALLET_ACCOUNT` (Leather and Xverse show index 0 as Account 1).
+
+- **Env file lost, phrase saved:** import the phrase into Leather or Xverse and open that account, or create the bot again with **Recovery phrase** and pick the same account.
+- **`.mm-wallet` lost, env files intact:** the bots keep running on their own keys. The page will not make another app wallet until you restore `.mm-wallet` from your backup, and it shows each bot's own key to back up instead of a phrase.
+- **Both lost:** the funds are gone. Back up the phrase when the page asks.

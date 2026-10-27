@@ -1001,11 +1001,13 @@ export class ConsoleStore {
       bins = bins.map((bar) => ({ ...bar, ours: owned.has(bar.id) ? bar.pool : 0 }));
     }
     const logs = tailLog(join(this.root, 'data', `bot.${profile.id}.log`));
+    const appPhrase = this.appPhraseOf(env);
     return {
       id: profile.id,
       profile: profile.pairId,
       name: env.BOT_NAME || null,
-      phraseBackedUp: env.KEY_SOURCE === 'app-phrase' ? Boolean(this.appPhraseOf(env)?.backedUpAt) : undefined,
+      phraseBackedUp: Boolean(appPhrase?.backedUpAt),
+      phraseOk: Boolean(appPhrase),
       preview: false,
       pair: profile.pair,
       poolId,
