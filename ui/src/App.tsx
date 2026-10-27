@@ -145,7 +145,7 @@ function Shell({
       <header className="topbar">
         <NavLink to="/" end className="brand2">
           <span className="brand-mark" />
-          <span>Bitflow MM</span>
+          <span>Bitflow Market Maker</span>
         </NavLink>
         <span className="spacer" />
         {offline ? (

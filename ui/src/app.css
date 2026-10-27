@@ -232,6 +232,10 @@ html, body { margin: 0; }
 .nx .bcard-new:hover .bcard-new-i { color: var(--accent); }
 .nx .bcard.is-preview { border-style: dashed; background: color-mix(in srgb, var(--panel) 70%, var(--page)); }
 .nx .bcard-h { display: flex; align-items: center; gap: 8px; }
+/* A long name truncates instead of pushing the badges into the card's padding. */
+.nx .bcard { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.nx .bcard-h { min-width: 0; }
+.nx .bcard-h > :not(.bcard-pair) { flex-shrink: 0; white-space: nowrap; }
 .nx .bcard-pair { font-weight: 650; font-size: 15px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nx .bcard-reason { color: var(--ink-2); font-size: 13px; min-height: 2.9em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .nx .bcard-nums { display: flex; gap: 22px; align-items: flex-end; }

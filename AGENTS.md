@@ -19,7 +19,7 @@ When a user has just downloaded this repo and asks you to set it up, get the app
 1. Check Node: `node -v` must be 20 or newer. If it is older or missing, install Node 22 (for example `nvm install 22 && nvm use 22`).
 2. From the repo root, run `npm install`.
 3. Run `npm run ui` and leave it running in the background. On first run it installs `ui/` dependencies itself.
-4. Wait for `Bitflow MM is running: http://127.0.0.1:5191`, then confirm with `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5191/api/fleet` (expect `200`).
+4. Wait for `Bitflow Market Maker is running: http://127.0.0.1:5191`, then confirm with `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5191/api/fleet` (expect `200`).
 5. Tell the user to open http://127.0.0.1:5191. There is no login. Preview bots with fake funds are already running, so the page is useful immediately.
 
 Do not create a real bot, go live, or fund a wallet unless the user asks. If port 5191 or 4173 is taken, set `CONSOLE_PAGE_PORT` / `CONSOLE_API_PORT`.

@@ -21,7 +21,7 @@ const downloadBackup = (backup: KeyBackupBody): void => {
         ]
       : ['To restore: import the private key into a Stacks wallet that accepts private keys,', `or put it back as SIGNER_KEY in ${backup.file}.`];
   const text = [
-    'Bitflow MM wallet backup',
+    'Bitflow Market Maker wallet backup',
     '',
     `Pool:        ${backup.pair}`,
     `Address:     ${backup.address}`,

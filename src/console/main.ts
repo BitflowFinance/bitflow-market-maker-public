@@ -35,7 +35,7 @@ const main = async (): Promise<void> => {
   });
 
   console.log('');
-  console.log(`Bitflow MM is running: http://127.0.0.1:${pagePort}`);
+  console.log(`Bitflow Market Maker is running: http://127.0.0.1:${pagePort}`);
   console.log('Only this computer can open it. Bots started from the page stop when this process stops.');
   console.log('');
 

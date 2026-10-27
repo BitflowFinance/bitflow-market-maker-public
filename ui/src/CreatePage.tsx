@@ -83,7 +83,7 @@ export function CreatePage({ fleet, reload }: Shared) {
   const importFile = async (file: File) => {
     try {
       const parsed = JSON.parse(await file.text()) as Partial<Strategy>;
-      if (parsed.kind !== 'bitflow-mm-strategy' || !parsed.pair || !parsed.settings) throw new Error('That file is not a Bitflow MM strategy.');
+      if (parsed.kind !== 'bitflow-mm-strategy' || !parsed.pair || !parsed.settings) throw new Error('That file is not a Bitflow Market Maker strategy.');
       if (!profiles?.some((item) => item.id === parsed.pair)) throw new Error(`This app does not know the pair "${parsed.pair}".`);
       applyStrategy(parsed as Strategy, parsed.name || '');
       setSource(`Imported strategy${parsed.name ? ` "${parsed.name}"` : ''} from ${file.name}`);

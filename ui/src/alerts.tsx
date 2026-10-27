@@ -27,7 +27,7 @@ export function useNeedAlerts(fleet: Fleet | null, enabled: boolean): void {
   const seen = useRef<Set<string> | null>(null);
   useEffect(() => {
     const count = fleet ? fleet.needs.length : 0;
-    document.title = count ? `(${count}) Bitflow MM` : 'Bitflow MM';
+    document.title = count ? `(${count}) Bitflow Market Maker` : 'Bitflow Market Maker';
   }, [fleet]);
   useEffect(() => {
     if (!fleet) return;
@@ -37,7 +37,7 @@ export function useNeedAlerts(fleet: Fleet | null, enabled: boolean): void {
       for (const need of fleet.needs) {
         if (seen.current.has(need.id)) continue;
         try {
-          new Notification(`Bitflow MM: ${need.what}`, { body: need.detail, tag: need.id });
+          new Notification(`Bitflow Market Maker: ${need.what}`, { body: need.detail, tag: need.id });
         } catch {
           // Some browsers (Android Chrome) only allow notifications from a service worker.
         }
