@@ -88,7 +88,7 @@ function RailBot({ bot }: { bot: BotView }) {
         <span className="rl-t">{bot.name || bot.pair}</span>
         <span className="rl-s">{bot.state.label}</span>
       </span>
-      {bot.preview ? null : bot.mode === 'live' ? <span className="mini live">LIVE</span> : <span className="mini">DRY</span>}
+      {bot.preview ? null : bot.mode === 'live' ? <span className="mini live">LIVE</span> : <span className="mini dry">DRY</span>}
     </NavLink>
   );
 }

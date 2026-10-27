@@ -104,12 +104,10 @@ function Header({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
         </div>
         <div className="bot-meta-clip">
         <dl className="bot-meta">
-          {bot.name ? (
-            <div>
-              <dt>Pair</dt>
-              <dd>{bot.pair}</dd>
-            </div>
-          ) : null}
+          <div>
+            <dt>Pair</dt>
+            <dd>{bot.pair}</dd>
+          </div>
           <div>
             <dt>Mode</dt>
             <dd>

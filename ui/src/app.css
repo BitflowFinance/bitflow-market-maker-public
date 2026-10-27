@@ -91,6 +91,7 @@ html, body { margin: 0; }
 /* Digits carry no descender, so a box-centred line box leaves them sitting high; the 1px top padding re-centres the glyph. */
 .nx .count { min-width: 20px; height: 20px; padding: 1px 6px 0; border-radius: 999px; background: var(--warn); color: var(--on-warn); font-size: 11px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; justify-content: center; }
 .nx .mini { font-size: 10px; font-weight: 700; letter-spacing: .05em; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.nx .mini.dry { color: var(--accent); background: var(--info-bg); border-color: var(--info-line); }
 .nx .mini.live { color: var(--danger-ink); background: var(--danger-bg); border-color: transparent; }
 
 .nx .main2 { min-width: 0; padding: 28px 32px 64px; }
