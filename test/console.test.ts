@@ -572,6 +572,16 @@ describe('local console', () => {
     expect((await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'create' })).status).toBe(200);
   });
 
+  it('stops the simulations once a real bot exists, and lets the user start one again', async () => {
+    const { call } = boot();
+    const sims = async () => ((await call('GET', '/api/fleet')).body as { bots: Array<{ id: string; preview: boolean; running: boolean }> }).bots.filter((bot) => bot.preview);
+    expect((await sims()).every((bot) => bot.running)).toBe(true);
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'create' });
+    expect((await sims()).some((bot) => bot.running)).toBe(false);
+    await call('POST', '/api/bots/preview-sbtc/start', {});
+    expect((await sims()).find((bot) => bot.id === 'preview-sbtc')?.running).toBe(true);
+  });
+
   it('gives overlapping creates their own ids and accounts', async () => {
     const { call } = boot();
     const [a, b] = await Promise.all([

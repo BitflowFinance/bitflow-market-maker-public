@@ -90,6 +90,15 @@ export class PreviewBook {
     this.step(state, nowMs);
   }
 
+  /** Stops every running simulation, once a real bot exists and they are only reference. */
+  park(nowMs: number): void {
+    for (const state of this.bots.values()) {
+      if (!state.running) continue;
+      state.running = false;
+      this.log(state, new Date(nowMs).toISOString(), 'info', 'Stopped because you have a real bot now. Start it again any time.');
+    }
+  }
+
   stop(id: string): void {
     const state = this.require(id);
     state.running = false;

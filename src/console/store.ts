@@ -203,6 +203,7 @@ export class ConsoleStore {
   pools: PoolCatalogReader;
   walletTokens: WalletTokenReader;
   private creating: Promise<void> = Promise.resolve();
+  private simsParked = false;
   private derived = new Map<string, string>();
   /** Pause between checks while confirming a pool change; tests swap in an instant one. */
   wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -244,6 +245,11 @@ export class ConsoleStore {
   private startErrors = new Map<string, string>();
 
   async fleet(nowMs: number): Promise<{ book: BookView; bots: BotView[]; needs: BotView['needs']; canCreate: boolean }> {
+    // Once, when the first real bot appears: later the user may start a simulation again and it stays running.
+    if (!this.simsParked && this.botIds().length) {
+      this.preview.park(nowMs);
+      this.simsParked = true;
+    }
     this.preview.advance(nowMs, 4000);
     const bots = await this.views(nowMs);
     const needs = bots.flatMap((bot) => bot.needs);
