@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { BotView, NeedItem, api } from './api';
+import { BotView, NeedItem, api, botPath } from './api';
 import type { Shared } from './App';
 import { RangeStrip, Sparkline, ValueChart, mergeSeries } from './charts';
 import { ago, pct, usd } from './format';
@@ -27,7 +27,7 @@ export function HomePage({ fleet, now, reload }: Shared) {
               </Link>
             ) : null}
           </div>
-          <NeedsList needs={fleet.needs} reload={reload} />
+          <NeedsList needs={fleet.needs} bots={fleet.bots} reload={reload} />
           {book.value != null ? (
             <Card className="book">
               <div className="stats">
@@ -61,7 +61,6 @@ export function HomePage({ fleet, now, reload }: Shared) {
                   <Icon name="plus" size={18} />
                 </span>
                 <b>New bot</b>
-                <span className="muted">Same pair or a different one. Each bot gets its own wallet.</span>
               </Link>
             </div>
             ) : null}
@@ -115,7 +114,7 @@ function Welcome() {
   );
 }
 
-function NeedsList({ needs, reload }: { needs: NeedItem[]; reload: () => Promise<void> }) {
+function NeedsList({ needs, bots, reload }: { needs: NeedItem[]; bots: BotView[]; reload: () => Promise<void> }) {
   const toast = useToast();
   const [busy, setBusy] = useState('');
   const start = (need: NeedItem) => {
@@ -127,6 +126,10 @@ function NeedsList({ needs, reload }: { needs: NeedItem[]; reload: () => Promise
       })
       .catch((err: Error) => toast('bad', err.message))
       .finally(() => setBusy(''));
+  };
+  const pathOf = (botId: string): string => {
+    const owner = bots.find((bot) => bot.id === botId);
+    return owner ? botPath(owner) : `/bots/${botId}`;
   };
   if (!needs.length) return null;
   return (
@@ -145,7 +148,7 @@ function NeedsList({ needs, reload }: { needs: NeedItem[]; reload: () => Promise
                 {busy === need.id ? 'Starting…' : 'Start'}
               </button>
             ) : (
-              <Link className="btn sm" to={`/bots/${need.botId}`}>
+              <Link className="btn sm" to={pathOf(need.botId)}>
                 Open
               </Link>
             )}
@@ -159,20 +162,17 @@ function NeedsList({ needs, reload }: { needs: NeedItem[]; reload: () => Promise
 export function BotCard({ bot, now }: { bot: BotView; now: number }) {
   const hasNumbers = bot.portfolioValue != null;
   return (
-    <Link to={`/bots/${bot.id}`} className={`bcard${bot.preview ? ' is-preview' : ''}`}>
+    <Link to={botPath(bot)} className={`bcard${bot.preview ? ' is-preview' : ''}`}>
       <div className="bcard-h">
         <span className="bcard-pair" title={bot.name || bot.pair}>{bot.name || bot.pair}</span>
         {bot.preview ? null : <ModeBadge preview={false} mode={bot.mode} />}
         <span className="spacer" />
         <Status tone={bot.state.tone} label={bot.state.label} title={bot.reason?.text || bot.state.detail} />
       </div>
-      {!hasNumbers ? (
+      {/* A stopped bot keeps the full card, with dashes, so the grid stays even. */}
+      {!hasNumbers && (bot.running || bot.startError) ? (
         <div className="bcard-empty">
-          {!bot.running
-            ? bot.startError || 'Off. Liquidity stays in the pool. Open it to start.'
-            : bot.lastCheckAt
-              ? bot.reason?.text || bot.state.detail
-              : 'Starting. Numbers appear after the first check.'}
+          {!bot.running ? bot.startError : bot.lastCheckAt ? bot.reason?.text || bot.state.detail : 'Starting. Numbers appear after the first check.'}
         </div>
       ) : (
         <>
@@ -192,7 +192,7 @@ export function BotCard({ bot, now }: { bot: BotView; now: number }) {
       <div className="bcard-f">
         <RangeStrip bins={bot.bins} width={96} />
         <span className="spacer" />
-        <span className="muted">{bot.running ? ago(bot.lastCheckAt, now) : 'stopped'}</span>
+        {bot.lastCheckAt ? <span className="muted">{bot.running ? ago(bot.lastCheckAt, now) : `last check ${ago(bot.lastCheckAt, now)}`}</span> : null}
       </div>
         </>
       )}

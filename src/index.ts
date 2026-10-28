@@ -8,6 +8,7 @@ import { broadcastLiquidity, prepareAddLiquidity, prepareWithdrawLiquidity } fro
 import { logError, logInfo, logWarn } from './logger';
 import { initMetrics, recordTick } from './metrics';
 import { runTick } from './mm';
+import { runSbtcWithdraw } from './sbtcWithdraw';
 import { SwapSide, prepareSwap } from './swap';
 import {
   assertSignerKeyMatchesAddress,
@@ -222,6 +223,11 @@ const main = async (): Promise<void> => {
   }
   if (process.argv.includes('--cash-out')) {
     const ok = await runCashOut(getArg('--to') || '', getArg('--memo') || '');
+    if (!ok) process.exitCode = 1;
+    return;
+  }
+  if (process.argv.includes('--sbtc-withdraw')) {
+    const ok = await runSbtcWithdraw(getArg('--amount') || '', getArg('--to') || '', getArg('--max-fee') || '');
     if (!ok) process.exitCode = 1;
     return;
   }

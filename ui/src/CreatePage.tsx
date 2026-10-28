@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { BotView, PhraseAccount, ProfileInfo, Strategy, WalletInfo, api } from './api';
+import { BotView, PhraseAccount, ProfileInfo, Strategy, WalletInfo, api, botPath } from './api';
+import { DepositPanel, useBridge } from './BridgePage';
 import type { Shared } from './App';
-import { poolName, tok } from './format';
+import { addressInput, hexInput, poolName, tok } from './format';
 import { PoolList, usePoolCatalog } from './PoolList';
 import { QrCode } from './QrCode';
 import { Card, CopyButton, Icon, Seg, useToast } from './ui';
@@ -126,6 +127,10 @@ export function CreatePage({ fleet, reload }: Shared) {
   }, [catalog, strategy]);
   const chosen = catalog?.pools.find((item) => item.poolId === contract) || null;
   const contractId = contract || pool?.poolId || '';
+  // sBTC pairs can also be funded with plain BTC through the sBTC bridge.
+  const canBridge = Boolean(created?.address && pool && (pool.baseSymbol === 'sBTC' || pool.quoteSymbol === 'sBTC'));
+  const [fundWith, setFundWith] = useState<'stacks' | 'btc'>('stacks');
+  const { view: bridgeView, error: bridgeError } = useBridge(canBridge && fundWith === 'btc' && step === fundStep && created ? created.id : null, true);
 
   const create = async () => {
     if (!pool) return;
@@ -344,7 +349,7 @@ export function CreatePage({ fleet, reload }: Shared) {
                   className="in mono"
                   type="password"
                   value={key}
-                  onChange={(e) => setKey(e.target.value)}
+                  onChange={(e) => setKey(hexInput(e.target.value))}
                   placeholder="64 hex characters, optionally ending in 01"
                   autoComplete="off"
                   spellCheck={false}
@@ -357,7 +362,7 @@ export function CreatePage({ fleet, reload }: Shared) {
                 <span className="field-l">
                   Address <span className="muted">(optional)</span>
                 </span>
-                <input className="in mono" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="SP…" spellCheck={false} />
+                <input className="in mono" value={address} onChange={(e) => setAddress(addressInput(e.target.value))} placeholder="SP…" spellCheck={false} />
               </label>
             </div>
           )}
@@ -433,8 +438,32 @@ export function CreatePage({ fleet, reload }: Shared) {
         <>
           <Card title="Fund the wallet">
             {created?.startError ? <p className="form-err">{created.startError}</p> : null}
-            <p className="muted">Send tokens to this bot's wallet from any Stacks wallet. Any amount works; the table suggests a start that lets the bot place liquidity on both sides.</p>
-            {created?.address ? (
+            <p className="muted">Send tokens to this bot's wallet. Any amount works; the table suggests a start that lets the bot place liquidity on both sides.</p>
+            {canBridge ? (
+              <Seg
+                value={fundWith}
+                onChange={setFundWith}
+                options={[
+                  { value: 'stacks', label: 'Send from a Stacks wallet' },
+                  { value: 'btc', label: 'Send BTC (arrives as sBTC)' },
+                ]}
+              />
+            ) : null}
+            {canBridge && fundWith === 'btc' ? (
+              bridgeView ? (
+                <>
+                  {bridgeError ? <p className="form-err">{bridgeError}</p> : null}
+                  <DepositPanel view={bridgeView} />
+                  <p className="note">
+                    {pool.quoteSymbol} and STX for fees still come from a Stacks wallet.
+                  </p>
+                </>
+              ) : bridgeError ? (
+                <p className="form-err">{bridgeError}</p>
+              ) : (
+                <span className="spinner" />
+              )
+            ) : created?.address ? (
               <div className="fundaddr">
                 <QrCode text={created.address} />
                 <div className="addrbox">
@@ -469,10 +498,19 @@ export function CreatePage({ fleet, reload }: Shared) {
               </tbody>
             </table>
             {pool.baseSymbol === 'STX' ? <p className="note">{pool.suggest.gas}</p> : null}
+            {pool.quoteSymbol === 'USDCx' ? (
+              <p className="note">
+                Have USDC on Ethereum? Bridge it at{' '}
+                <a href="https://bridge.stacks.co/usdc/eth/stx" target="_blank" rel="noreferrer">
+                  bridge.stacks.co <Icon name="external" size={11} />
+                </a>{' '}
+                and send the USDCx to the bot's address.
+              </p>
+            ) : null}
           </Card>
           <div className="row-between">
             <span className="spacer" />
-            <button type="button" className="btn primary" onClick={() => navigate(`/bots/${createdId || pool.id}`)}>
+            <button type="button" className="btn primary" onClick={() => navigate(created ? botPath(created) : `/bots/${createdId || pool.id}`)}>
               Open the bot
               <Icon name="arrow" />
             </button>

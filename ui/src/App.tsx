@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
-import { BotView, Fleet, Tone, api } from './api';
+import { BotView, Fleet, Tone, api, botFromPath, botPath } from './api';
 import { BotPage } from './BotPage';
+import { BridgePage } from './BridgePage';
 import { CreatePage } from './CreatePage';
 import { HomePage } from './HomePage';
 import { NotifyButton, useNeedAlerts, useNotifyPref } from './alerts';
@@ -82,7 +83,7 @@ export function App() {
 
 function RailBot({ bot }: { bot: BotView }) {
   return (
-    <NavLink to={`/bots/${bot.id}`} className={({ isActive }) => `rl${isActive ? ' on' : ''}`} title={bot.state.detail}>
+    <NavLink to={botPath(bot)} className={({ isActive }) => `rl${isActive ? ' on' : ''}`} title={bot.state.detail}>
       <Dot tone={bot.state.tone} />
       <span className="rl-main">
         <span className="rl-t">{bot.name || bot.pair}</span>
@@ -133,7 +134,8 @@ function Shell({
     }
   };
   // A folded section still lists the bot being viewed, so the rail always shows where you are.
-  const current = loc.pathname.startsWith('/bots/') ? decodeURIComponent(loc.pathname.slice('/bots/'.length)) : '';
+  const currentPath = loc.pathname.startsWith('/bots/') ? decodeURIComponent(loc.pathname.slice('/bots/'.length)) : '';
+  const current = currentPath ? botFromPath(fleet.bots, currentPath)?.id || '' : '';
   const shownBots = showBots ? real : real.filter((bot) => bot.id === current);
   const shownSims = !real.length || showSims ? previews : previews.filter((bot) => bot.id === current);
   useEffect(() => {
@@ -184,6 +186,12 @@ function Shell({
             <span className="rl-t">Overview</span>
           </span>
           {needCount ? <span className="count">{needCount}</span> : null}
+        </NavLink>
+        <NavLink to="/bridge" className={({ isActive }) => `rl rl-top${isActive ? ' on' : ''}`}>
+          <Icon name="bridge" size={16} />
+          <span className="rl-main">
+            <span className="rl-t">Bridge</span>
+          </span>
         </NavLink>
         {real.length ? (
           <button type="button" className="rail-h rail-toggle" onClick={() => setShowBots(!showBots)} aria-expanded={showBots}>
@@ -237,6 +245,7 @@ function Shell({
           <Route path="/" element={<HomePage {...shared} />} />
           <Route path="/bots/:id" element={<BotPage {...shared} />} />
           <Route path="/new" element={<CreatePage {...shared} />} />
+          <Route path="/bridge" element={<BridgePage {...shared} />} />
           <Route path="*" element={<HomePage {...shared} />} />
         </Routes>
       </main>

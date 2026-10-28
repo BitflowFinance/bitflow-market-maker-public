@@ -31,6 +31,8 @@ export interface BinBar {
   pool: number;
   ours: number;
   active: boolean;
+  /** The bin's price in the quote token, when the pool ladder gives one. */
+  price?: number;
 }
 
 export type Tone = 'good' | 'info' | 'warn' | 'serious' | 'unknown';

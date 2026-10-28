@@ -15,11 +15,13 @@
     "fees": "tsx scripts/fee-report.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "ui": "tsx src/console/main.ts"
+    "ui": "tsx src/console/main.ts",
+    "ui:demo": "CONSOLE_BRIDGE_DEMO=1 tsx src/console/main.ts"
   },
   "dependencies": {
     "@scure/bip32": "^1.7.0",
     "@scure/bip39": "^1.6.0",
+    "@scure/btc-signer": "^1.8.1",
     "@stacks/network": "^6.16.0",
     "@stacks/transactions": "^6.17.0",
     "dotenv": "^17.2.3",

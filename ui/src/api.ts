@@ -20,6 +20,7 @@ export interface BinBar {
   pool: number;
   ours: number;
   active: boolean;
+  price?: number;
 }
 
 export interface LogLine {
@@ -232,17 +233,51 @@ export interface ProfileInfo {
   suggest: { base: string; quote: string; gas: string; note: string };
 }
 
-export interface BridgeJob {
+export interface BridgeTransfer {
   id: string;
-  botId: string;
-  pair: string;
-  direction: string;
-  amount: string;
-  status: string;
+  kind: 'deposit' | 'withdraw';
+  status: 'sending' | 'sent' | 'processing' | 'done' | 'failed';
+  amountSats: number;
   message: string;
-  depositAddress: string | null;
-  stacksAddress: string;
+  createdAt: string;
+  updatedAt: string;
+  btcTxid: string | null;
+  stacksTxid: string | null;
+  btcAddress?: string;
+  maxFeeSats?: number;
 }
+
+export interface BridgeView {
+  botId: string;
+  /** Demo mode: made-up balances and transfers. */
+  demo: boolean;
+  stacksAddress: string;
+  tradesSbtc: boolean;
+  deposit: { address: string; minSats: number | null; feeSats: number | null; maxFeeSats: number; lockBlocks: number } | null;
+  withdraw: { minSats: number; maxSats: number | null; feeSats: number | null; costSats: number | null; heldSats: number | null; blocked: string | null };
+  stx: number | null;
+  transfers: BridgeTransfer[];
+}
+
+/**
+ * A bot's page path, from its pair rather than its env-file id: sbtc-usdcx,
+ * sbtc-usdcx-2 for a second bot of the pair, simulation-sbtc-usdcx. The id
+ * stays the key everywhere else (env file, metrics, API).
+ */
+export const botSlug = (bot: { id: string; pair: string; preview: boolean }): string => {
+  const pair = bot.pair.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const n = bot.preview ? null : bot.id.match(/-(\d+)$/);
+  return `${bot.preview ? 'simulation-' : ''}${pair}${n ? `-${n[1]}` : ''}`;
+};
+
+export const botPath = (bot: { id: string; pair: string; preview: boolean }): string => `/bots/${botSlug(bot)}`;
+
+/** The bot a page path names; bare ids from older links still resolve. */
+export const botFromPath = <T extends { id: string; pair: string; preview: boolean }>(bots: T[], param: string): T | undefined =>
+  bots.find((bot) => botSlug(bot) === param) || bots.find((bot) => bot.id === param);
+
+export const mempoolTx = (txid: string): string => `https://mempool.space/tx/${txid}`;
+export const mempoolAddress = (address: string): string => `https://mempool.space/address/${address}`;
 
 export class ApiError extends Error {
   status: number;

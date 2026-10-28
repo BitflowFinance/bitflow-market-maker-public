@@ -1,6 +1,5 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
-import { BRIDGE_ENABLED } from './bridgeLive';
-import { BridgeBody, ConsoleStore, HttpError, ManualBody } from './store';
+import { ConsoleStore, HttpError, ManualBody } from './store';
 
 interface Reply {
   status: number;
@@ -121,6 +120,10 @@ export const handleConsole = async (store: ConsoleStore, req: ConsoleRequest, no
     const out = store.decisionsCsv(decodeURIComponent(csv[1]));
     return { status: 200, body: null, file: { name: out.filename, type: 'text/csv; charset=utf-8', text: out.text } };
   }
+  if (method === 'GET' && path === '/api/bridge') return { status: 200, body: { transfers: store.bridgeTransfers() } };
+  if (method === 'GET' && botAction && botAction[2] === 'bridge') {
+    return { status: 200, body: await store.bridgeView(decodeURIComponent(botAction[1])) };
+  }
   if (method === 'GET' && botAction && botAction[2] === 'cash-out') {
     const bot = await store.one(decodeURIComponent(botAction[1]), nowMs);
     return { status: 200, body: { cashOut: bot.cashOut } };
@@ -204,6 +207,21 @@ export const handleConsole = async (store: ConsoleStore, req: ConsoleRequest, no
         }),
       };
     }
+    if (action === 'bridge-deposit') return { status: 200, body: await store.bridgeDeposit(id) };
+    if (action === 'bridge-demo-send') return { status: 200, body: await store.bridgeDemoSend(id) };
+    if (action === 'bridge-withdraw') {
+      // Sends funds to an address typed here, so it answers only the page, like the payout address.
+      requirePage(req);
+      return {
+        status: 200,
+        body: await store.bridgeWithdraw(id, {
+          amount: typeof body.amount === 'string' ? body.amount : '',
+          btcAddress: typeof body.btcAddress === 'string' ? body.btcAddress : '',
+          acknowledged: body.acknowledged === true,
+          poolName: typeof body.poolName === 'string' ? body.poolName : '',
+        }),
+      };
+    }
     if (action === 'cash-out') {
       return {
         status: 200,
@@ -227,26 +245,6 @@ export const handleConsole = async (store: ConsoleStore, req: ConsoleRequest, no
       return { status: 200, body: await store.manual(id, manual) };
     }
   }
-  if (!BRIDGE_ENABLED) throw new HttpError(404, 'not_found', 'No such call.');
-  if (method === 'POST' && path === '/api/bridge') {
-    const bridge: BridgeBody = {
-      botId: String(body.botId || ''),
-      direction: String(body.direction || ''),
-      amount: String(body.amount || ''),
-      acknowledged: body.acknowledged === true,
-      poolName: typeof body.poolName === 'string' ? body.poolName : '',
-      reclaimPublicKey: typeof body.reclaimPublicKey === 'string' ? body.reclaimPublicKey : undefined,
-      bitcoinAddress: typeof body.bitcoinAddress === 'string' ? body.bitcoinAddress : undefined,
-    };
-    return { status: 200, body: await store.startBridge(bridge) };
-  }
-  const bridgeTx = path.match(/^\/api\/bridge\/([^/]+)\/txid$/);
-  if (method === 'POST' && bridgeTx) {
-    return { status: 200, body: await store.notifyBridge(decodeURIComponent(bridgeTx[1]), String(body.txid || '')) };
-  }
-  const bridgeGet = path.match(/^\/api\/bridge\/([^/]+)$/);
-  if (method === 'GET' && bridgeGet) return { status: 200, body: store.bridgeJob(decodeURIComponent(bridgeGet[1])) };
-
   throw new HttpError(404, 'not_found', 'No such call.');
 };
 

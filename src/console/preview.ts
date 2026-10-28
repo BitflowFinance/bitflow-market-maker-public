@@ -159,6 +159,7 @@ export class PreviewBook {
         pool: (4 + 10 * Math.pow(0.82, fromActive) + ((id * 7) % 5) * 0.4) * 100,
         ours: fromCenter <= half ? 120 * Math.pow(0.6, fromCenter) : 0,
         active: id === active,
+        price: state.price * Math.pow(1 + BIN_STEP[state.profile.id], id - active),
       });
     }
     return bars;

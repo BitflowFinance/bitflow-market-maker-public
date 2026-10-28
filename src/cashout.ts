@@ -68,10 +68,10 @@ const strayTokens = async (signer: string): Promise<PoolToken[]> => {
 // A pending or missing nonce means another transaction from this wallet is in
 // flight; sending now would queue behind it or collide, so stop and let the
 // user run cash-out again once it settles.
-const freshContext = async (): Promise<{ address: string; nonce: number; fee: bigint }> => {
+export const freshContext = async (): Promise<{ address: string; nonce: number; fee: bigint }> => {
   const pf = await preflight();
   if (pf.mempoolPending || pf.missingNonces.length) {
-    throw new Error('another transaction from this wallet is still pending; run cash out again in a minute');
+    throw new Error('another transaction from this wallet is still pending; try again in a minute');
   }
   return { address: pf.address, nonce: pf.nonce, fee: pf.fee };
 };

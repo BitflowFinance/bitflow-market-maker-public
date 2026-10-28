@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BinBar } from './api';
-import { clock, usd } from './format';
+import { clock, price, usd } from './format';
 
 function useWidth<T extends HTMLElement>(): [React.RefObject<T>, number] {
   const ref = useRef<T>(null);
@@ -132,7 +132,19 @@ export function ValueChart({ points, height = 150, empty = 'The value line appea
   );
 }
 
-export function BinChart({ bins, havePoolDepth, height = 190 }: { bins: BinBar[]; havePoolDepth: boolean; height?: number }) {
+export function BinChart({
+  bins,
+  havePoolDepth,
+  height = 190,
+  priceLabel,
+  priceUnit,
+}: {
+  bins: BinBar[];
+  havePoolDepth: boolean;
+  height?: number;
+  priceLabel?: string;
+  priceUnit?: string;
+}) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   if (!bins.length) {
@@ -176,7 +188,7 @@ export function BinChart({ bins, havePoolDepth, height = 190 }: { bins: BinBar[]
           <g>
             <line className="active" x1={activeIndex * bw + bw / 2} x2={activeIndex * bw + bw / 2} y1={top - 4} y2={top + h} />
             <text className="active-l" x={activeIndex * bw + bw / 2} y={top - 7} textAnchor="middle">
-              price
+              {activeIndex >= 0 && bins[activeIndex].price != null ? price(bins[activeIndex].price as number, priceUnit || '').trim() : priceLabel || 'price'}
             </text>
           </g>
         ) : null}
@@ -184,6 +196,7 @@ export function BinChart({ bins, havePoolDepth, height = 190 }: { bins: BinBar[]
       {hovered ? (
         <div className="ctip" style={{ left: Math.min(width - 260, Math.max(0, (hover as number) * bw - 90)) }}>
           <b>{hovered.active ? 'Current price' : `${(hover as number) - activeIndex > 0 ? '+' : ''}${(hover as number) - activeIndex} bins from price`}</b>
+          {hovered.price != null ? <> · {price(hovered.price, priceUnit || '').trim()}</> : null}
           {havePoolDepth ? <> · Pool {usd(hovered.pool)}</> : null}
           {hovered.ours > 0 ? <> · Yours {havePoolDepth ? usd(hovered.ours) : 'in this bin'}</> : null}
         </div>

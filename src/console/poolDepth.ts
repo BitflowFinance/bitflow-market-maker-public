@@ -94,7 +94,9 @@ export const barsFromLadder = (
       ? num(bin.reserve_y) / Math.pow(10, quoteDecimals) + (num(bin.reserve_x) / Math.pow(10, baseDecimals)) * num(bin.price) * scale
       : 0;
     const share = owned.get(id);
-    bars.push({ id, pool, ours: share == null ? 0 : pool * share, active: id === active });
+    const bar: BinBar = { id, pool, ours: share == null ? 0 : pool * share, active: id === active };
+    if (bin && num(bin.price) > 0) bar.price = num(bin.price) * scale;
+    bars.push(bar);
   }
   return bars;
 };

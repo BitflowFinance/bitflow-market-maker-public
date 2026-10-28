@@ -1,13 +1,14 @@
 import { ReactNode, useEffect, useMemo, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { BotView, DecisionRow, HistoryRange, LogLine, ReasonKind, api, explorerAddress, explorerContract, explorerTx } from './api';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { BotView, DecisionRow, HistoryRange, LogLine, ReasonKind, api, botFromPath, botPath, botSlug, explorerAddress, explorerContract, explorerTx } from './api';
 import type { Shared } from './App';
 import { BinChart, ValueChart } from './charts';
-import { ago, clock, countdown, pct, poolName, price, shortAddr, stx, tok, usd } from './format';
+import { ago, clock, countdown, decimalInput, pct, placesOf, poolName, price, shortAddr, stx, tok, usd } from './format';
 import { Card, CopyButton, Dot, Empty, Icon, Modal, ModeBadge, RiskConfirm, Seg, Stat, downloadFile, useToast } from './ui';
 import { KeysCard } from './KeysCard';
 import { BotTitle, StrategyCard } from './StrategyCard';
 import { PoolCard } from './PoolCard';
+import { rememberBot } from './BridgePage';
 import { WalletTab } from './WalletTab';
 
 type Tab = 'overview' | 'activity' | 'wallet' | 'safety' | 'settings' | 'actions';
@@ -32,7 +33,13 @@ export function BotPage({ fleet, reload, now }: Shared) {
   useEffect(() => {
     if (params.get('tab') === 'manual') setParams({ tab: 'actions' }, { replace: true });
   }, [params, setParams]);
-  const bot = fleet.bots.find((item) => item.id === id);
+  const bot = botFromPath(fleet.bots, id);
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (bot && !bot.preview) rememberBot(bot.id);
+    // An old id link moves to the readable path, keeping the tab.
+    if (bot && id !== botSlug(bot)) navigate(`${botPath(bot)}${window.location.search}`, { replace: true });
+  }, [bot?.id, bot?.preview, id]);
   if (!bot) {
     return (
       <div className="page">
@@ -215,7 +222,7 @@ function Header({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
 
 /** One sentence for the status card that never just repeats its label. */
 const statusText = (bot: BotView): string => {
-  if (!bot.running) return bot.startError || 'The bot is off. Liquidity stays in the pool, unmanaged.';
+  if (!bot.running) return bot.startError || '';
   if (bot.paused) return 'Watching, not trading. Liquidity stays in the pool.';
   if (!bot.lastCheckAt) return 'Waiting for the first check.';
   if (bot.reasonRaw === 'kill_switch') return bot.state.detail;
@@ -233,14 +240,14 @@ function StatusLine({ bot, now }: { bot: BotView; now: number }) {
   if (bot.readFailures) chips.push(`${bot.readFailures.count} failed read${bot.readFailures.count === 1 ? '' : 's'} in a row · halts at ${bot.readFailures.max}`);
   if (bot.holdingsCarried && bot.holdingsAsOf) chips.push(`Balances from the last good read, ${ago(bot.holdingsAsOf, now)}`);
   return (
-    <section className={`statusline t-${tone}`}>
+    <section className={`statusline t-${tone}${text || chips.length ? '' : ' one'}`}>
       <Dot tone={tone} />
       <div className="sl-body">
         <div className="sl-head">
           <span className={`sl-label t-${tone}`}>{bot.startError ? 'Didn’t start' : bot.state.label}</span>
           {when ? <span className="sl-when">{when}</span> : null}
         </div>
-        <div className="sl-text">{text}</div>
+        {text ? <div className="sl-text">{text}</div> : null}
         {chips.length ? (
           <div className="sl-sub">
             {chips.map((chip) => (
@@ -279,11 +286,6 @@ function Overview({ bot, now }: { bot: BotView; now: number }) {
           <Stat label="Value" value={usd(bot.portfolioValue)} />
           <Stat label="Vs. holding" value={usd(vs, true)} tone={vs == null || vs === 0 ? undefined : vs > 0 ? 'up' : 'down'} />
           <Stat label="In pool" value={usd(bot.inPoolValue)} sub={bot.portfolioValue && bot.inPoolValue != null ? `${pct(bot.inPoolValue / bot.portfolioValue)} of value` : undefined} />
-          <Stat
-            label={`${bot.baseSymbol} price (${bot.quoteSymbol})`}
-            value={price(bot.price, '').trim()}
-            sub={bot.market ? `Market ${price(bot.market.refPrice, '').trim()}` : undefined}
-          />
         </div>
         <FactStrip bot={bot} now={now} />
         <HistoryChart bot={bot} />
@@ -314,7 +316,7 @@ function Overview({ bot, now }: { bot: BotView; now: number }) {
               ±{bot.curve.width} bins · {pct(bot.curve.sizeFraction)} of funds deployed · re-centres after {bot.curve.repoDrift} bins
             </p>
           ) : null}
-          <BinChart bins={bot.bins} havePoolDepth={bot.binsHavePoolDepth} />
+          <BinChart bins={bot.bins} havePoolDepth={bot.binsHavePoolDepth} priceLabel={bot.price != null ? price(bot.price, bot.quoteSymbol) : undefined} priceUnit={bot.quoteSymbol} />
         </Card>
         <Card title="Holdings">
           <table className="tbl">
@@ -450,7 +452,7 @@ function HistoryChart({ bot }: { bot: BotView }) {
   return (
     <div className="hchart">
       <div className="hchart-h">
-        <span className="muted">Value over time</span>
+        <h3 className="hchart-t">Value over time</h3>
         <Seg value={range} onChange={setRange} options={RANGES} />
       </div>
       <ValueChart points={shown} height={170} />
@@ -1071,7 +1073,7 @@ function Settings({ bot, reload }: { bot: BotView; reload: () => Promise<void> }
                           disabled={ro}
                           placeholder={`${toDisplay(field, BOT_DEFAULTS[field.key])} (default)`}
                           value={draft[field.key]}
-                          onChange={(e) => setDraft({ ...draft, [field.key]: e.target.value })}
+                          onChange={(e) => setDraft({ ...draft, [field.key]: decimalInput(e.target.value) })}
                         />
                         {field.unit ? <span className="unit">{field.unit}</span> : null}
                       </span>
@@ -1357,7 +1359,7 @@ function ManualInputs(props: {
         <label className="field">
           <span className="field-l">Amount</span>
           <span className="in-unit">
-            <input className="in" inputMode="decimal" value={props.amount} onChange={(e) => props.setAmount(e.target.value)} placeholder="0.0" />
+            <input className="in" inputMode="decimal" value={props.amount} onChange={(e) => props.setAmount(decimalInput(e.target.value, placesOf(sym)))} placeholder="0.0" />
             <span className="unit">{sym}</span>
           </span>
           <span className="sf-h">Wallet: {tok(have, sym)}</span>
@@ -1371,7 +1373,7 @@ function ManualInputs(props: {
         <label className="field">
           <span className="field-l">{bot.baseSymbol}</span>
           <span className="in-unit">
-            <input className="in" inputMode="decimal" value={props.xAmount} onChange={(e) => props.setXAmount(e.target.value)} placeholder="0" />
+            <input className="in" inputMode="decimal" value={props.xAmount} onChange={(e) => props.setXAmount(decimalInput(e.target.value, placesOf(bot.baseSymbol)))} placeholder="0" />
             <span className="unit">{bot.baseSymbol}</span>
           </span>
           <span className="sf-h">Wallet: {tok(bot.walletBase, bot.baseSymbol)}</span>
@@ -1379,7 +1381,7 @@ function ManualInputs(props: {
         <label className="field">
           <span className="field-l">{bot.quoteSymbol}</span>
           <span className="in-unit">
-            <input className="in" inputMode="decimal" value={props.yAmount} onChange={(e) => props.setYAmount(e.target.value)} placeholder="0" />
+            <input className="in" inputMode="decimal" value={props.yAmount} onChange={(e) => props.setYAmount(decimalInput(e.target.value, placesOf(bot.quoteSymbol)))} placeholder="0" />
             <span className="unit">{bot.quoteSymbol}</span>
           </span>
           <span className="sf-h">Wallet: {tok(bot.walletQuote, bot.quoteSymbol)}</span>

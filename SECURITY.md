@@ -7,7 +7,7 @@ This bot signs mainnet transactions with a private key you give it. Read this be
 - Use a **dedicated Stacks account** for the bot. Never reuse a wallet that holds anything else.
 - `SIGNER_KEY` lives only in your local `.env.<pool>` file. Those files are gitignored; keep them that way. Do not paste the key into issues, logs, chat, or screenshots.
 - A wallet the page creates comes from one recovery phrase kept in `.mm-wallet` (gitignored, readable only by your user). That phrase controls every bot the page made a wallet for, so treat it like all of their keys at once. A phrase you import is never stored; only the chosen account's key is.
-- The bot never sends tokens to any address other than the pool contracts and back to `SIGNER_ADDRESS`. If you see anything else in a transaction preview, stop and report it.
+- The bot never sends tokens to any address other than the pool contracts and back to `SIGNER_ADDRESS`, except two things you start yourself on the page: cash out (to the payout address you saved) and an sBTC withdrawal (to the Bitcoin address you typed on the Bridge page). Both routes answer only the page, not the API. If you see anything else in a transaction preview, stop and report it.
 - At startup in live mode the bot refuses to run if `SIGNER_KEY` does not derive to `SIGNER_ADDRESS`.
 
 ## Metrics API

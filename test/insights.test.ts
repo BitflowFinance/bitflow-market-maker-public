@@ -103,6 +103,8 @@ describe('pool depth', () => {
     // 1 base at a raw price of 1e9 (scaled by 1e8 and 10^(8-6)) is 1000 quote.
     expect(next?.pool).toBeCloseTo(1000, 6);
     expect(next?.ours).toBeCloseTo(250, 6);
+    expect(next?.price).toBeCloseTo(1000, 6);
+    expect(bars.find((bar) => bar.id === 502)?.price).toBeUndefined();
   });
 });
 

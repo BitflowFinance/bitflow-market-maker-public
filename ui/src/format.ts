@@ -74,3 +74,24 @@ export const shortAddr = (address: string | null | undefined): string => {
   if (!address) return '';
   return address.length > 14 ? `${address.slice(0, 6)}…${address.slice(-5)}` : address;
 };
+
+// Input filters: a field only ever holds what it can accept, so a stray letter
+// never reaches validation. Pasted text is cleaned the same way.
+
+/** Digits and one decimal point, at most `places` after it. A typed comma counts as the point. */
+export const decimalInput = (raw: string, places = 18): string => {
+  const text = raw.replace(/,/g, '.').replace(/[^\d.]/g, '');
+  const dot = text.indexOf('.');
+  if (dot < 0) return text;
+  return `${text.slice(0, dot + 1)}${text.slice(dot + 1).replace(/\./g, '').slice(0, places)}`;
+};
+
+/** Letters and digits only: Stacks and Bitcoin addresses have nothing else, and pasted spaces drop out. */
+export const addressInput = (raw: string): string => raw.replace(/[^A-Za-z0-9]/g, '');
+
+export const hexInput = (raw: string): string => raw.replace(/^\s*0x/i, '').replace(/[^0-9a-fA-F]/g, '');
+
+const TOKEN_PLACES: Record<string, number> = { sBTC: 8, BTC: 8, STX: 6, USDCx: 6 };
+
+/** Decimal places a token amount can have on chain; unknown tokens are left unlimited. */
+export const placesOf = (symbol: string): number => TOKEN_PLACES[symbol] ?? 18;

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { BotView, KeyBackup as KeyBackupBody, api, explorerAddress, explorerTx } from './api';
-import { clock, shortAddr, tok } from './format';
+import { addressInput, clock, hexInput, shortAddr, tok } from './format';
 import { Link } from 'react-router-dom';
 import { QrCode } from './QrCode';
 import { Card, CopyButton, Empty, Icon, Modal, RiskConfirm, downloadFile, useToast } from './ui';
@@ -140,7 +140,7 @@ export function KeyBackup({ bot, onDone }: { bot: BotView; onDone: () => void })
       </div>
       <label className="field">
         <span className="field-l">{phrase ? 'Type the last word of the phrase you saved' : `Type the last ${TAIL} characters of the key you saved`}</span>
-        <input className="in mono" value={tail} onChange={(e) => setTail(e.target.value)} maxLength={phrase ? 12 : TAIL} autoComplete="off" spellCheck={false} />
+        <input className="in mono" value={tail} onChange={(e) => setTail(phrase ? e.target.value.replace(/[^a-zA-Z]/g, '') : hexInput(e.target.value))} maxLength={phrase ? 12 : TAIL} autoComplete="off" spellCheck={false} />
       </label>
       {error ? <p className="form-err">{error}</p> : null}
       <div>
@@ -190,6 +190,24 @@ function KeyCard({ bot, reload }: { bot: BotView; reload: () => Promise<void> })
           />
         </Modal>
       ) : null}
+    </Card>
+  );
+}
+
+/** Shortcut to the Bridge page with this bot already chosen. */
+function BridgeCard({ bot }: { bot: BotView }) {
+  const trades = bot.baseSymbol === 'sBTC' || bot.quoteSymbol === 'sBTC';
+  const stray = bot.strayTokens.some((token) => token.symbol === 'sBTC' && token.amount > 0);
+  if (!trades && !stray) return null;
+  return (
+    <Card title="Bridge">
+      <p className="muted">Bridge assets in and out of this wallet.</p>
+      <div>
+        <Link to={`/bridge?bot=${encodeURIComponent(bot.id)}${trades ? '' : '&dir=out'}`} className="btn">
+          Go to Bridge
+          <Icon name="arrow" />
+        </Link>
+      </div>
     </Card>
   );
 }
@@ -249,7 +267,7 @@ function PayoutCard({ bot, reload }: { bot: BotView; reload: () => Promise<void>
           <div className="explain">
             <label className="field">
               <span className="field-l">Your Stacks address</span>
-              <input className="in mono" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="SP…" spellCheck={false} autoComplete="off" />
+              <input className="in mono" value={address} onChange={(e) => setAddress(addressInput(e.target.value))} placeholder="SP…" spellCheck={false} autoComplete="off" />
               <span className="sf-h">A wallet you control, not this bot's wallet. Check it character by character.</span>
             </label>
             <label className="field">
@@ -261,7 +279,7 @@ function PayoutCard({ bot, reload }: { bot: BotView; reload: () => Promise<void>
             </label>
             <label className="field">
               <span className="field-l">Type the last {TAIL} characters of the address</span>
-              <input className="in mono" value={tail} onChange={(e) => setTail(e.target.value)} maxLength={TAIL} spellCheck={false} autoComplete="off" />
+              <input className="in mono" value={tail} onChange={(e) => setTail(addressInput(e.target.value))} maxLength={TAIL} spellCheck={false} autoComplete="off" />
             </label>
             {error ? <p className="form-err">{error}</p> : null}
           </div>
@@ -441,7 +459,10 @@ export function WalletTab({ bot, reload }: { bot: BotView; reload: () => Promise
           {bot.holdingsAsOf ? `Pool as of the bot's check at ${clock(bot.holdingsAsOf)}.` : 'The pool shows after the bot\'s first check.'}
         </p>
       </Card>
-      <KeyCard bot={bot} reload={reload} />
+      <div className="stack">
+        <KeyCard bot={bot} reload={reload} />
+        <BridgeCard bot={bot} />
+      </div>
       {bot.strayTokens.length ? (
         <Card title="Other tokens in this wallet" className="span2" aside={<span className="tag t-warn">Not traded</span>}>
           <p className="muted">

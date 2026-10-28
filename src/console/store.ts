@@ -1,6 +1,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { checkMemo, checkPayoutAddress } from '../payout';
+import { MAX_WITHDRAW_FEE_SATS, MIN_WITHDRAW_SATS, SBTC_TOKEN, btcRecipientOf } from '../sbtc';
+import { DEMO_HELD_SATS, DEMO_STX, DemoBridge, demoHistory, demoWithdrawRun } from './bridgeDemo';
+import { BridgeBook, BridgeClient, BridgeTransfer, btcToSats, buildDeposit, depositFeeOf, reclaimKeyOf, withdrawCostOf, withdrawFeeOf } from './bridge';
 import {
   insideRoot,
   readEnv,
@@ -81,32 +84,6 @@ export interface ConsoleHost {
   isBot?(pid: number, profile: string): boolean;
   runManual(profile: string, args: string[], opts?: { timeoutMs?: number; onOutput?: (text: string) => void }): Promise<string>;
   readRemote(profile: string, port: number): Promise<RemoteRead>;
-}
-
-export interface BridgeInput {
-  botId: string;
-  direction: string;
-  amount: string;
-  stacksAddress: string;
-  reclaimPublicKey: string;
-  bitcoinAddress: string;
-}
-
-export interface BridgeJob {
-  id: string;
-  botId: string;
-  pair: string;
-  direction: string;
-  amount: string;
-  status: string;
-  message: string;
-  depositAddress: string | null;
-  stacksAddress: string;
-}
-
-export interface BridgeClient {
-  prepare(input: BridgeInput): Promise<BridgeJob>;
-  notify(job: BridgeJob, txid: string): Promise<BridgeJob>;
 }
 
 // Each step waits for its transaction to confirm and may replace-by-fee, so the
@@ -196,8 +173,12 @@ export class ConsoleStore {
   host: ConsoleHost;
   bridge: BridgeClient;
   preview: PreviewBook;
-  jobs = new Map<string, BridgeJob>();
-  private jobSeq = 1;
+  private bridgeBooks = new Map<string, BridgeBook>();
+  /** Bot id -> the withdrawal its runner is signing. */
+  private bridgeRuns = new Map<string, string>();
+  private bridgeSyncing = false;
+  /** Set by main.ts for CONSOLE_BRIDGE_DEMO=1: fake balances and transfers, kept in their own files. */
+  bridgeDemo: DemoBridge | null = null;
 
   depth: PoolDepthReader;
   pools: PoolCatalogReader;
@@ -908,45 +889,195 @@ export class ConsoleStore {
     return match.poolId;
   }
 
-  async startBridge(body: BridgeBody): Promise<BridgeJob> {
-    if (body.botId.startsWith('preview-')) {
-      throw new HttpError(409, 'preview', 'Preview bots have no wallet. Bridge into a real bot.');
+  private bridgePath(profile: string): string {
+    return insideRoot(this.root, `data/bridge.${profile}${this.bridgeDemo ? '.demo' : ''}.json`);
+  }
+
+  private bridgeBook(profile: string): BridgeBook {
+    let book = this.bridgeBooks.get(profile);
+    if (!book) {
+      const fresh = !existsSync(this.bridgePath(profile));
+      book = new BridgeBook(this.bridgePath(profile));
+      if (this.bridgeDemo && fresh) book.seed(demoHistory(Date.now()));
+      this.bridgeBooks.set(profile, book);
     }
-    const profile = this.requireProfile(body.botId);
+    return book;
+  }
+
+  /** sBTC (in sats) and STX the wallet holds, or nulls before the first chain read. */
+  private bridgeWallet(address: string): { heldSats: number | null; stx: number | null } {
+    if (this.bridgeDemo) return { heldSats: DEMO_HELD_SATS, stx: DEMO_STX };
+    const wallet = this.walletTokens.peek(address);
+    if (!wallet) return { heldSats: null, stx: null };
+    const held = wallet.tokens.find((token) => token.contract === SBTC_TOKEN);
+    return { heldSats: Math.round((held ? held.amount : 0) * 1e8), stx: wallet.stx };
+  }
+
+  /** Demo mode only: pretends the user sent BTC to the bot's deposit address. */
+  bridgeDemoSend(id: string): BridgeView | Promise<BridgeView> {
+    if (!this.bridgeDemo) throw new HttpError(404, 'not_found', 'No such call.');
+    const { profile } = this.requireBridgeBot(id);
+    const deposit = this.bridgeBook(profile.id).latestAddress();
+    if (deposit) this.bridgeDemo.send(deposit.address, 50_000);
+    return this.bridgeView(id);
+  }
+
+  private requireBridgeBot(id: string): { profile: Profile; env: Record<string, string> } {
+    if (id.startsWith('preview-')) throw new HttpError(409, 'preview', 'Simulations have no wallet. Bridge into a real bot.');
+    const profile = this.requireProfile(id);
     const env = readEnvFile(this.envPath(profile.id));
-    if (!env.SIGNER_ADDRESS) throw new HttpError(409, 'no_wallet', 'This bot has no wallet address yet.');
-    if (!body.acknowledged || body.poolName !== profile.pair) {
-      throw new HttpError(409, 'confirm', `Tick the box and type ${profile.pair} before moving funds.`);
-    }
-    const job = await this.bridge.prepare({
+    if (!env.SIGNER_ADDRESS || !env.SIGNER_KEY) throw new HttpError(409, 'no_wallet', 'This bot has no wallet yet.');
+    return { profile, env };
+  }
+
+  /** The bot's deposit address (once made), withdrawal limits and every transfer, newest first. */
+  async bridgeView(id: string): Promise<BridgeView> {
+    const { profile, env } = this.requireBridgeBot(id);
+    const book = this.bridgeBook(profile.id);
+    const [signersKey, rate, limits] = await Promise.all([
+      this.bridge.signersKey().catch(() => null),
+      this.bridge.feeRate().catch(() => null),
+      this.bridge.limits().catch(() => null),
+    ]);
+    const deposit = signersKey ? book.current(signersKey) : book.latestAddress();
+    const wallet = this.bridgeWallet(env.SIGNER_ADDRESS);
+    const run = this.bridgeRuns.get(profile.id);
+    let blocked: string | null = null;
+    if (run) blocked = 'A transfer is being signed.';
+    else if (this.cashOuts.get(profile.id)?.status === 'running') blocked = 'Cash out is running.';
+    else if (this.poolSwitches.get(profile.id)?.status === 'running') blocked = 'The pool change is running.';
+    else if (!this.isPaused(env) && this.runningPid(profile.id) != null) blocked = 'Pause the bot to bridge out.';
+    return {
       botId: profile.id,
-      direction: body.direction,
-      amount: body.amount,
+      demo: Boolean(this.bridgeDemo),
       stacksAddress: env.SIGNER_ADDRESS,
-      reclaimPublicKey: body.reclaimPublicKey || '',
-      bitcoinAddress: body.bitcoinAddress || '',
-    });
-    job.id = `bridge-${this.jobSeq}`;
-    this.jobSeq += 1;
-    job.pair = profile.pair;
-    job.botId = profile.id;
-    this.jobs.set(job.id, job);
-    return job;
+      tradesSbtc: profile.baseSymbol === 'sBTC' || profile.quoteSymbol === 'sBTC',
+      deposit: deposit
+        ? {
+            address: deposit.address,
+            minSats: limits ? limits.minDepositSats : null,
+            feeSats: rate != null ? depositFeeOf(rate) : null,
+            maxFeeSats: deposit.maxFeeSats,
+            lockBlocks: deposit.lockBlocks,
+          }
+        : null,
+      withdraw: {
+        minSats: MIN_WITHDRAW_SATS,
+        maxSats: limits ? limits.maxWithdrawSats : null,
+        feeSats: rate != null ? withdrawFeeOf(rate) : null,
+        costSats: rate != null ? withdrawCostOf(rate) : null,
+        heldSats: wallet.heldSats,
+        blocked,
+      },
+      stx: wallet.stx,
+      transfers: [...book.transfers].reverse(),
+    };
   }
 
-  async notifyBridge(id: string, txid: string): Promise<BridgeJob> {
-    const job = this.jobs.get(id);
-    if (!job) throw new HttpError(404, 'not_found', 'No bridge transfer with that id.');
-    if (!/^[0-9a-fA-F]{64}$/.test(txid.trim())) throw new HttpError(400, 'txid', 'Enter the 64-character transaction id.');
-    const next = await this.bridge.notify(job, txid.trim());
-    this.jobs.set(id, next);
-    return next;
+  /** Makes (or returns) the deposit address. Nothing leaves the bot wallet, so no confirmation is asked. */
+  async bridgeDeposit(id: string): Promise<BridgeView> {
+    const { profile, env } = this.requireBridgeBot(id);
+    const book = this.bridgeBook(profile.id);
+    let signersKey: string;
+    try {
+      signersKey = await this.bridge.signersKey();
+    } catch (err) {
+      throw new HttpError(502, 'bridge_unreachable', `Could not reach the sBTC signers (${(err as Error).message}). Try again in a minute.`);
+    }
+    if (!book.current(signersKey)) {
+      book.addAddress(buildDeposit(env.SIGNER_ADDRESS, signersKey, reclaimKeyOf(env.SIGNER_KEY), new Date()));
+    }
+    return this.bridgeView(id);
   }
 
-  bridgeJob(id: string): BridgeJob {
-    const job = this.jobs.get(id);
-    if (!job) throw new HttpError(404, 'not_found', 'No bridge transfer with that id.');
-    return job;
+  /** Sends sBTC from the bot wallet to a Bitcoin address. The server gates this route to the page. */
+  async bridgeWithdraw(id: string, body: { amount: string; btcAddress: string; acknowledged: boolean; poolName: string }): Promise<BridgeView> {
+    const { profile, env } = this.requireBridgeBot(id);
+    this.refuseDuringJob(profile.id);
+    const btcAddress = body.btcAddress.trim();
+    try {
+      btcRecipientOf(btcAddress);
+    } catch (err) {
+      throw new HttpError(400, 'btc_address', (err as Error).message);
+    }
+    const sats = btcToSats(body.amount);
+    if (sats == null) throw new HttpError(400, 'amount', 'Enter an amount in BTC, like 0.01.');
+    if (sats < MIN_WITHDRAW_SATS) throw new HttpError(400, 'amount', `Withdraw at least ${MIN_WITHDRAW_SATS / 1e8} BTC.`);
+    const limits = await this.bridge.limits().catch(() => null);
+    if (limits?.maxWithdrawSats != null && sats > limits.maxWithdrawSats) {
+      throw new HttpError(400, 'amount', `The signers accept at most ${limits.maxWithdrawSats / 1e8} BTC right now.`);
+    }
+    if (!body.acknowledged || body.poolName !== profile.pair) {
+      throw new HttpError(409, 'confirm', `This sends sBTC out of the bot wallet. Tick the box and type ${profile.pair}.`);
+    }
+    // Same reason as manual trades: a running loop would race this for the nonce.
+    if (!this.isPaused(env) && this.runningPid(profile.id) != null) {
+      throw new HttpError(409, 'pause_first', 'Pause the bot first, so it does not send a transaction at the same time.');
+    }
+    const rate = await this.bridge.feeRate().catch(() => null);
+    const maxFeeSats = rate != null ? withdrawFeeOf(rate) : MAX_WITHDRAW_FEE_SATS;
+    const held = this.bridgeWallet(env.SIGNER_ADDRESS).heldSats;
+    if (held != null) {
+      if (sats + maxFeeSats > held) {
+        throw new HttpError(
+          409,
+          'balance',
+          `The wallet holds ${held / 1e8} sBTC; this needs ${(sats + maxFeeSats) / 1e8} including the bridge fee. Withdraw from the pool first or send less.`,
+        );
+      }
+    }
+
+    const book = this.bridgeBook(profile.id);
+    const transfer = book.addWithdrawal({ amountSats: sats, btcAddress, maxFeeSats }, new Date());
+    this.bridgeRuns.set(profile.id, transfer.id);
+    let raw = '';
+    const run = this.bridgeDemo
+      ? demoWithdrawRun()
+      : this.host.runManual(profile.id, ['--sbtc-withdraw', '--amount', String(sats), '--to', btcAddress, '--max-fee', String(maxFeeSats)], {
+          timeoutMs: CASH_OUT_TIMEOUT_MS,
+          onOutput: (text) => {
+            raw += text;
+          },
+        });
+    void run
+      .then((output) => {
+        if (!raw) raw = output;
+        book.update(transfer.id, withdrawOutcome(raw), new Date());
+      })
+      .catch((err: Error) => {
+        book.update(transfer.id, { status: 'failed', message: `Did not run: ${err.message}. Nothing was sent.` }, new Date());
+      })
+      .finally(() => {
+        this.bridgeRuns.delete(profile.id);
+      });
+    return this.bridgeView(id);
+  }
+
+  /** Every bot's bridge transfers in one list, newest first, for the Bridge page. */
+  bridgeTransfers(): Array<BridgeTransfer & { botId: string }> {
+    const all: Array<BridgeTransfer & { botId: string }> = [];
+    for (const id of this.botIds()) {
+      if (!this.bridgeBooks.has(id) && !existsSync(this.bridgePath(id))) continue;
+      for (const transfer of this.bridgeBook(id).transfers) all.push({ ...transfer, botId: id });
+    }
+    return all.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  }
+
+  /** One pass over every bot with an open deposit address or transfer. main.ts runs it on a timer. */
+  async syncBridges(now: Date): Promise<void> {
+    if (this.bridgeSyncing) return;
+    this.bridgeSyncing = true;
+    try {
+      for (const id of this.botIds()) {
+        if (!this.bridgeBooks.has(id) && !existsSync(this.bridgePath(id))) continue;
+        const book = this.bridgeBook(id);
+        if (!book.active) continue;
+        const env = readEnvFile(this.envPath(id));
+        if (env.SIGNER_ADDRESS) await book.sync(this.bridge, env.SIGNER_ADDRESS, now);
+      }
+    } finally {
+      this.bridgeSyncing = false;
+    }
   }
 
   private async views(nowMs: number): Promise<BotView[]> {
@@ -1072,6 +1203,9 @@ export class ConsoleStore {
     if (move && move.status === 'running') {
       throw new HttpError(409, 'switching_pool', 'The pool change is still running. Wait for it to finish.');
     }
+    if (this.bridgeRuns.has(profile)) {
+      throw new HttpError(409, 'bridging', 'An sBTC to BTC transfer is being signed. Wait for it to finish.');
+    }
   }
 
   private isPaused(env: Record<string, string>): boolean {
@@ -1171,15 +1305,38 @@ export interface ManualBody {
   pct?: number;
 }
 
-export interface BridgeBody {
+export interface BridgeView {
   botId: string;
-  direction: string;
-  amount: string;
-  acknowledged: boolean;
-  poolName: string;
-  reclaimPublicKey?: string;
-  bitcoinAddress?: string;
+  demo: boolean;
+  stacksAddress: string;
+  tradesSbtc: boolean;
+  deposit: {
+    address: string;
+    minSats: number | null;
+    feeSats: number | null;
+    maxFeeSats: number;
+    lockBlocks: number;
+  } | null;
+  /** feeSats is the cap held back for the signers; costSats what they are expected to actually take. */
+  withdraw: { minSats: number; maxSats: number | null; feeSats: number | null; costSats: number | null; heldSats: number | null; blocked: string | null };
+  stx: number | null;
+  transfers: BridgeTransfer[];
 }
+
+/** What the `--sbtc-withdraw` runner's output says happened. */
+export const withdrawOutcome = (raw: string): Partial<BridgeTransfer> => {
+  const lines = raw.split('\n').map(parseLogLine);
+  const tx = lines.map((line) => line.text.match(/^\[sbtc\] step=request tx=(0x[0-9a-fA-F]+)/)).find(Boolean);
+  const stacksTxid = tx ? tx[1] : null;
+  if (lines.some((line) => /^\[sbtc\] done\b/.test(line.text))) {
+    return { status: 'processing', stacksTxid, message: 'Waiting for the signers to send BTC.' };
+  }
+  const failed = lines.map((line) => line.text.match(/^\[sbtc\] failed error="(.*)"$/)).find(Boolean);
+  const why = failed ? failed[1] : 'the runner stopped without saying why';
+  // A broadcast that never confirmed may still land, so it is not called "nothing sent".
+  const tail = stacksTxid ? ` Check transaction ${stacksTxid} before trying again.` : ' Nothing was sent.';
+  return { status: 'failed', stacksTxid, message: `Not sent: ${why}.${tail}` };
+};
 
 const csvCell = (value: string | number | null | undefined): string => {
   const text = value == null ? '' : String(value);

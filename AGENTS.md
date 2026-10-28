@@ -40,7 +40,8 @@ Agent calls go to `http://127.0.0.1:4173` with `content-type: application/json`.
 - `POST /api/bots/:id/settings` writes the env file and restarts. `SIGNER_KEY` is rejected. Setting `EXECUTION_MODE` to `live` also requires `confirmLive: true` and the exact `poolName`.
 - `POST /api/bots/:id/cash-out` pauses and stops the bot, withdraws everything, and sends all tokens and STX to the saved payout address. It works in dry run. Body must include `acknowledged: true` and the exact `poolName`; it returns 409 `no_payout` until the user saves an address. It runs in the background: poll `GET /api/bots/:id/cash-out` until `status` is `done` or `failed`. A `failed` run is safe to repeat. Only cash out when the user asks in chat.
 - `key-backup`, `key-saved`, and `payout` answer only the page (403 `page_only` otherwise). Do not try to get around that: never read, print, or repeat `SIGNER_KEY`, and never set or suggest a payout address the user did not type themselves. Send the user to the Wallet tab instead.
-- Bridging is turned off for now (`BRIDGE_ENABLED` in `src/console/bridgeLive.ts`); `/api/bridge` returns 404. Preview ids look like `preview-sbtc`.
+- `GET /api/bridge` lists every bot's transfers. `GET /api/bots/:id/bridge` gives the bot's sBTC deposit address, withdrawal limits, and transfers. `POST /api/bots/:id/bridge-deposit` makes the deposit address (nothing leaves the wallet; the console finds and registers deposits itself). `bridge-withdraw` sends sBTC to a Bitcoin address, so it answers only the page; send the user to the Bridge page.
+- Preview ids look like `preview-sbtc`.
 
 New bots are created with `POST /api/bots` and always start in dry run. Importing a key writes it to `.env.<pool>` and the JSON response must not contain it.
 
@@ -111,7 +112,9 @@ logInfo('[tag] key="value"');
 - `src/conversion.ts` - `swap_only` inventory conversion
 - `src/cashout.ts`    - `--cash-out`: withdraw all, send tokens + STX to the payout address
 - `src/payout.ts`     - Payout address / memo checks (no CONFIG, shared with the console)
-- `src/console/`      - Local page helper (`npm run ui`): API, bot processes, env files
+- `src/sbtc.ts`       - sBTC peg constants + Bitcoin address encoding (no CONFIG, shared)
+- `src/sbtcWithdraw.ts` - `--sbtc-withdraw`: one sBTC -> BTC withdrawal request
+- `src/console/`      - Local page helper (`npm run ui`): API, bot processes, env files, sBTC bridge (`bridge.ts`)
 - `src/plan.ts`       - Execute the rebalance plan (withdraw/swap/add)
 - `src/primitives.ts` - Market-making actions (swap/add/withdraw)
 - `src/swap.ts`       - DLMM swap router calls + output estimate

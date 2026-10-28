@@ -73,3 +73,11 @@ Each bot's key is `SIGNER_KEY` in its `.env.<bot>` file. Wallets the page create
 - **Env file lost, phrase saved:** import the phrase into Leather or Xverse and open that account, or create the bot again with **Recovery phrase** and pick the same account.
 - **`.mm-wallet` lost, env files intact:** the bots keep running on their own keys. The page will not make another app wallet until you restore `.mm-wallet` from your backup, and it shows each bot's own key to back up instead of a phrase.
 - **Both lost:** the funds are gone. Back up the phrase when the page asks.
+
+## 7. sBTC bridge transfer stuck
+
+Transfers and the deposit address's scripts are in `data/bridge.<bot>.json`. Do not delete it while a transfer is open.
+
+- **BTC sent, nothing on the Bridge page:** the page only notices deposits while `npm run ui` is running. Start it; it keeps watching each deposit address for 30 days and registers the BTC with the signers when it finds it.
+- **Deposit failed:** the signers did not sweep it, so the BTC is still at the deposit address. After 950 Bitcoin blocks (about a week) it can be reclaimed with the bot's key, using the `reclaimScript` in the file (the `sbtc` package's `buildSbtcReclaimTx`). The page does not build this yet.
+- **Withdrawal failed after a Stacks tx:** check the transaction on the explorer before trying again. If it confirmed, the signers either send the BTC or return the sBTC to the bot wallet.

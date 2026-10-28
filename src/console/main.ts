@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import { existsSync } from 'fs';
 import { join } from 'path';
+import { demoBridge } from './bridgeDemo';
 import { liveBridgeClient } from './bridgeLive';
 import { processHost } from './host';
 import { livePoolDepth } from './poolDepth';
@@ -25,8 +26,12 @@ const main = async (): Promise<void> => {
     });
   }
 
-  const store = new ConsoleStore(root, processHost(root), liveBridgeClient(), Date.now(), livePoolDepth(), livePoolCatalog(), liveWalletTokens());
+  const demo = process.env.CONSOLE_BRIDGE_DEMO === '1' ? demoBridge() : null;
+  const store = new ConsoleStore(root, processHost(root), demo || liveBridgeClient(), Date.now(), livePoolDepth(), livePoolCatalog(), liveWalletTokens());
+  store.bridgeDemo = demo;
   await listenConsole(store, apiPort);
+  // Deposits are found and registered with the signers from here, so they go through even with the page closed.
+  setInterval(() => void store.syncBridges(new Date()).catch(() => undefined), demo ? 3000 : 20_000);
 
   const vite = spawn('npm', ['run', 'dev', '--prefix', 'ui', '--', '--port', String(pagePort), '--strictPort', '--host', '127.0.0.1'], {
     cwd: root,
@@ -37,6 +42,7 @@ const main = async (): Promise<void> => {
   console.log('');
   console.log(`Bitflow Market Maker is running: http://127.0.0.1:${pagePort}`);
   console.log('Only this computer can open it. Bots started from the page stop when this process stops.');
+  if (demo) console.log('Bridge demo mode: balances and transfers on the Bridge page are made up. Do not send real BTC.');
   console.log('');
 
   const shutdown = (): void => {

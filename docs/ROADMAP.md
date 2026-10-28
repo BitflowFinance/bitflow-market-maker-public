@@ -22,10 +22,10 @@ Ideas we have agreed to build later. Not scheduled yet.
 - How "Vs. holding" and the profit baseline carry across a move.
 - What happens when there is no next pool.
 
-## Bring back bridging
+## Bridging, what is left
 
-BTC → sBTC bridging works but is switched off to keep the first release simple.
+BTC ↔ sBTC is on the Bridge page and the Fund step. Still to build:
 
-- Server: `BRIDGE_ENABLED` in `src/console/bridgeLive.ts` turns `/api/bridge` back on. The store logic and its tests are still in place.
-- Page: `ui/src/BridgeForm.tsx` is kept but not imported. To bring it back, add a Bridge page and nav link in `ui/src/App.tsx`, and the bridge card on the Fund step of `ui/src/CreatePage.tsx`.
-- Not built: sBTC → BTC, and USDC ↔ USDCx (needs an Ethereum wallet connection).
+- USDCx → USDC: the bot signs `usdcx-v1.burn` to an Ethereum address, like the sBTC withdrawal.
+- USDC → USDCx: approve + `depositToRemote` on Ethereum's xReserve, which needs an Ethereum wallet in the page (or a link out with the bot address ready).
+- Reclaiming a failed sBTC deposit from the page (`buildSbtcReclaimTx`, signed with the bot key).

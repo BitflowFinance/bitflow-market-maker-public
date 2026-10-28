@@ -2,11 +2,13 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
-import { checkBridgeInput, xOnlyKey } from '../src/console/bridgeLive';
+import { BridgeClient, EmilyRecord, btcToSats, reclaimKeyOf, withdrawFeeOf, xOnlyKey } from '../src/console/bridge';
+import { btcRecipientOf } from '../src/sbtc';
+import { demoBridge } from '../src/console/bridgeDemo';
 import { bookOf, humanReason, parseLogLine, validateSettings } from '../src/console/model';
 import { decimalToMicro } from '../src/console/money';
 import { handleConsole, RequestHeaders } from '../src/console/server';
-import { BridgeClient, BridgeInput, BridgeJob, ConsoleHost, ConsoleStore, HttpError, manualOutcome } from '../src/console/store';
+import { ConsoleHost, ConsoleStore, HttpError, manualOutcome, withdrawOutcome } from '../src/console/store';
 import { accountOf } from '../src/console/phrase';
 import { createWallet } from '../src/console/wallet';
 import { checkMemo, checkPayoutAddress, stxSweepAmount } from '../src/payout';
@@ -51,27 +53,31 @@ class MemHost implements ConsoleHost {
   }
 }
 
-const fakeBridge = (): { client: BridgeClient; seen: BridgeInput[] } => {
-  const seen: BridgeInput[] = [];
-  const client: BridgeClient = {
-    prepare: (input) => {
-      seen.push(input);
-      const job: BridgeJob = {
-        id: '',
-        botId: input.botId,
-        pair: '',
-        direction: input.direction,
-        amount: input.amount,
-        status: 'needs_deposit',
-        message: 'Send BTC to the deposit address.',
-        depositAddress: 'bc1qexample',
-        stacksAddress: input.stacksAddress,
-      };
-      return Promise.resolve(job);
-    },
-    notify: (job, txid) => Promise.resolve({ ...job, status: 'pending', message: txid }),
+const fakeBridge = () => {
+  const state = {
+    signers: reclaimKeyOf(createWallet().key),
+    utxos: new Map<string, Array<{ txid: string; vout: number; value: number; confirmed: boolean }>>(),
+    emily: new Map<string, EmilyRecord>(),
+    withdrawals: new Map<string, EmilyRecord>(),
+    registered: [] as string[],
+    rate: 2,
   };
-  return { client, seen };
+  const client: BridgeClient = {
+    signersKey: () => Promise.resolve(state.signers),
+    utxos: (address) => Promise.resolve(state.utxos.get(address) || []),
+    register: (deposit) => {
+      const key = `${deposit.txid}:${deposit.vout}`;
+      state.registered.push(key);
+      const record: EmilyRecord = { status: 'pending', message: '', btcTxid: null, stacksTxid: null, requestId: null };
+      state.emily.set(key, record);
+      return Promise.resolve(record);
+    },
+    deposit: (txid, vout) => Promise.resolve(state.emily.get(`${txid}:${vout}`) || null),
+    withdrawal: (_sender, stacksTxid) => Promise.resolve(state.withdrawals.get(stacksTxid) || null),
+    feeRate: () => Promise.resolve(state.rate),
+    limits: () => Promise.resolve({ minDepositSats: 10_000, maxWithdrawSats: 5_000_000_000 }),
+  };
+  return { client, state };
 };
 
 const boot = () => {
@@ -115,14 +121,6 @@ describe('local console', () => {
     expect(rebound.status).toBe(403);
     const formPost = await call('POST', '/api/bots/preview-sbtc/pause', undefined, { host: '127.0.0.1:4173', contentType: 'text/plain' });
     expect(formPost.status).toBe(415);
-  });
-
-  it('keeps bridging turned off for now', async () => {
-    const { call } = boot();
-    const bridge = await call('POST', '/api/bridge', { botId: 'sbtc', direction: 'btc_to_sbtc', amount: '0.01' });
-    expect(bridge.status).toBe(404);
-    const profiles = await call('GET', '/api/profiles');
-    expect(JSON.stringify(profiles.body)).not.toContain('bridge');
   });
 
   it('starts with preview bots that have fake funds and no wallet', async () => {
@@ -265,17 +263,104 @@ describe('local console', () => {
     expect(readFileSync(join(root, 'data', 'metrics-baseline.stx.json.reset'), 'utf8').length).toBeGreaterThan(0);
   });
 
-  it('refuses to bridge a preview and confirms a real deposit (store only while the route is off)', async () => {
-    const { call, bridge, store } = boot();
-    const base = { direction: 'btc_to_sbtc', amount: '0.01', poolName: 'sBTC / USDCx' };
-    await expect(store.startBridge({ ...base, botId: 'preview-sbtc', acknowledged: true })).rejects.toMatchObject({ status: 409 });
+  it('makes one deposit address per bot, refunding to the bot key', async () => {
+    const { call, root, bridge } = boot();
+    expect((await call('POST', '/api/bots/preview-sbtc/bridge-deposit')).status).toBe(409);
     const wallet = createWallet();
     await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: wallet.key });
-    await expect(store.startBridge({ ...base, botId: 'sbtc', acknowledged: false })).rejects.toMatchObject({ status: 409 });
-    const job = await store.startBridge({ ...base, botId: 'sbtc', acknowledged: true, reclaimPublicKey: '11'.repeat(32) });
-    expect(job.depositAddress).toBe('bc1qexample');
-    expect(JSON.stringify(job)).not.toContain(wallet.key);
-    expect(bridge.seen[0].stacksAddress).toBe(wallet.address);
+    const first = await call('POST', '/api/bots/sbtc/bridge-deposit');
+    expect(first.status).toBe(200);
+    const view = first.body as { deposit: { address: string; minSats: number; feeSats: number }; stacksAddress: string };
+    expect(view.deposit.address).toMatch(/^bc1p/);
+    expect(view.deposit.minSats).toBe(10_000);
+    expect(view.deposit.feeSats).toBe(600);
+    expect(view.stacksAddress).toBe(wallet.address);
+    const again = (await call('POST', '/api/bots/sbtc/bridge-deposit')).body as { deposit: { address: string } };
+    expect(again.deposit.address).toBe(view.deposit.address);
+    const file = readFileSync(join(root, 'data', 'bridge.sbtc.json'), 'utf8');
+    expect(file).not.toContain(wallet.key.slice(0, 64));
+    expect(JSON.parse(file).addresses[0].reclaimKey).toBe(reclaimKeyOf(wallet.key));
+    expect(JSON.stringify(first.body)).not.toContain(wallet.key.slice(0, 64));
+
+    // A signers' key rotation retires the address: the view asks for a new one.
+    bridge.state.signers = reclaimKeyOf(createWallet().key);
+    expect(((await call('GET', '/api/bots/sbtc/bridge')).body as { deposit: unknown }).deposit).toBeNull();
+    const rotated = (await call('POST', '/api/bots/sbtc/bridge-deposit')).body as { deposit: { address: string } };
+    expect(rotated.deposit.address).not.toBe(view.deposit.address);
+  });
+
+  it('finds BTC at the deposit address and registers it once', async () => {
+    const { call, store, bridge } = boot();
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: wallet.key });
+    const address = ((await call('POST', '/api/bots/sbtc/bridge-deposit')).body as { deposit: { address: string } }).deposit.address;
+    await store.syncBridges(new Date());
+    expect(((await call('GET', '/api/bots/sbtc/bridge')).body as { transfers: unknown[] }).transfers).toEqual([]);
+
+    const txid = 'ab'.repeat(32);
+    bridge.state.utxos.set(address, [{ txid, vout: 1, value: 250_000, confirmed: false }]);
+    await store.syncBridges(new Date());
+    await store.syncBridges(new Date());
+    expect(bridge.state.registered).toEqual([`${txid}:1`]);
+    let transfers = ((await call('GET', '/api/bots/sbtc/bridge')).body as { transfers: Array<{ kind: string; status: string; amountSats: number; stacksTxid: string | null }> }).transfers;
+    expect(transfers).toHaveLength(1);
+    expect(transfers[0]).toMatchObject({ kind: 'deposit', status: 'processing', amountSats: 250_000 });
+
+    bridge.state.emily.set(`${txid}:1`, { status: 'confirmed', message: '', btcTxid: 'cd'.repeat(32), stacksTxid: '0x01', requestId: null });
+    await store.syncBridges(new Date());
+    transfers = ((await call('GET', '/api/bots/sbtc/bridge')).body as typeof transfers & { transfers: typeof transfers }).transfers;
+    expect(transfers[0]).toMatchObject({ status: 'done', stacksTxid: '0x01' });
+
+    const all = (await call('GET', '/api/bridge')).body as { transfers: Array<{ botId: string; status: string }> };
+    expect(all.transfers).toEqual([expect.objectContaining({ botId: 'sbtc', status: 'done' })]);
+
+    // Survives a console restart.
+    const reopened = new ConsoleStore(store.root, store.host, bridge.client, Date.now());
+    const view = await reopened.bridgeView('sbtc');
+    expect(view.transfers[0].status).toBe('done');
+    expect(view.deposit?.address).toBe(address);
+  });
+
+  it('withdraws sBTC through the bot runner, only from the page and only while paused', async () => {
+    const { call, store, host, bridge } = boot();
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: wallet.key });
+    const to = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq';
+    const body = { amount: '0.001', btcAddress: to, acknowledged: true, poolName: 'sBTC / USDCx' };
+    const err = async (payload: unknown) => ((await call('POST', '/api/bots/sbtc/bridge-withdraw', payload, PAGE)).body as { error: string }).error;
+
+    expect((await call('POST', '/api/bots/sbtc/bridge-withdraw', body)).status).toBe(403);
+    expect(await err({ ...body, btcAddress: 'tb1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq' })).toBe('btc_address');
+    expect(await err({ ...body, amount: '0.00001' })).toBe('amount');
+    expect(await err({ ...body, amount: '1.123456789' })).toBe('amount');
+    expect(await err({ ...body, poolName: 'nope' })).toBe('confirm');
+    await call('POST', '/api/bots/sbtc/resume');
+    expect(await err(body)).toBe('pause_first');
+    await call('POST', '/api/bots/sbtc/pause');
+
+    let release = (): void => undefined;
+    host.manualGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    host.manualOutput = '[sbtc] step=request tx=0xabc ok=true status="success"\n[sbtc] done tx=0xabc\n';
+    const started = await call('POST', '/api/bots/sbtc/bridge-withdraw', body, PAGE);
+    expect(started.status).toBe(200);
+    expect((started.body as { transfers: Array<{ status: string }> }).transfers[0].status).toBe('sending');
+    expect(host.manual[host.manual.length - 1]).toEqual(['--sbtc-withdraw', '--amount', '100000', '--to', to, '--max-fee', String(withdrawFeeOf(2))]);
+    // Nothing else may move funds while the request is being signed.
+    expect(((await call('POST', '/api/bots/sbtc/cash-out', { acknowledged: true, poolName: 'sBTC / USDCx' })).body as { error: string }).error).toBe('bridging');
+    expect(await err(body)).toBe('bridging');
+
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    let view = await store.bridgeView('sbtc');
+    expect(view.transfers[0]).toMatchObject({ kind: 'withdraw', status: 'processing', stacksTxid: '0xabc', btcAddress: to });
+    expect(view.withdraw.blocked).toBeNull();
+
+    bridge.state.withdrawals.set('0xabc', { status: 'confirmed', message: '', btcTxid: 'ef'.repeat(32), stacksTxid: null, requestId: 7 });
+    await store.syncBridges(new Date());
+    view = await store.bridgeView('sbtc');
+    expect(view.transfers[0]).toMatchObject({ status: 'done', btcTxid: 'ef'.repeat(32), requestId: 7 });
   });
 
   it('creates the data folder before starting a new bot', async () => {
@@ -363,13 +448,44 @@ describe('local console', () => {
     expect(validateSettings({ CURVE_HALF_WIDTH_BINS: '8' }, {})).toBe('');
   });
 
-  it('checks a bridge request before touching the network', () => {
-    const base = { botId: 'sbtc', amount: '0.01', stacksAddress: 'SP000', reclaimPublicKey: '', bitcoinAddress: '' };
-    expect(checkBridgeInput({ ...base, direction: 'usdc_to_usdcx' })).toContain('not built into the page yet');
-    expect(checkBridgeInput({ ...base, direction: 'btc_to_sbtc', amount: '0.0001', reclaimPublicKey: '11'.repeat(32) })).toContain('at least');
-    expect(checkBridgeInput({ ...base, direction: 'btc_to_sbtc' })).toContain('public key');
-    expect(checkBridgeInput({ ...base, direction: 'btc_to_sbtc', reclaimPublicKey: `02${'ab'.repeat(32)}` })).toBe('');
+  it('runs the bridge demo on made-up data in its own files', async () => {
+    const { call, store, root } = boot();
+    const demo = demoBridge();
+    store.bridge = demo;
+    store.bridgeDemo = demo;
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: createWallet().key });
+    const view = (await call('POST', '/api/bots/sbtc/bridge-deposit')).body as { demo: boolean; withdraw: { heldSats: number }; transfers: unknown[] };
+    expect(view.demo).toBe(true);
+    expect(view.withdraw.heldSats).toBeGreaterThan(0);
+    expect(view.transfers).toHaveLength(3);
+    expect(existsSync(join(root, 'data', 'bridge.sbtc.json'))).toBe(false);
+    await call('POST', '/api/bots/sbtc/bridge-demo-send');
+    await store.syncBridges(new Date());
+    const after = (await call('GET', '/api/bots/sbtc/bridge')).body as { transfers: Array<{ kind: string; status: string }> };
+    expect(after.transfers[0]).toMatchObject({ kind: 'deposit', status: 'processing' });
+  });
+
+  it('refuses the demo hook outside demo mode', async () => {
+    const { call } = boot();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: createWallet().key });
+    expect((await call('POST', '/api/bots/sbtc/bridge-demo-send')).status).toBe(404);
+  });
+
+  it('reads bridge amounts, Bitcoin addresses and runner output', () => {
+    expect(btcToSats('0.0015')).toBe(150_000);
+    expect(btcToSats('1')).toBe(100_000_000);
+    expect(btcToSats('0.000000001')).toBeNull();
+    expect(btcToSats('-1')).toBeNull();
+    expect(btcToSats('0')).toBeNull();
+    expect(Array.from(btcRecipientOf('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq').version)).toEqual([4]);
+    expect(Array.from(btcRecipientOf('bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297').version)).toEqual([6]);
+    expect(Array.from(btcRecipientOf('1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2').version)).toEqual([0]);
+    expect(Array.from(btcRecipientOf('3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy').version)).toEqual([1]);
+    expect(() => btcRecipientOf('SP000')).toThrow('Bitcoin mainnet');
     expect(xOnlyKey(`03${'ab'.repeat(32)}`)).toBe('ab'.repeat(32));
+    expect(xOnlyKey(`04${'ab'.repeat(32)}${'cd'.repeat(32)}`)).toBe('ab'.repeat(32));
+    expect(withdrawOutcome('[sbtc] failed error="the wallet holds 5 sats"')).toMatchObject({ status: 'failed', stacksTxid: null, message: expect.stringContaining('Nothing was sent') });
+    expect(withdrawOutcome('[sbtc] step=request tx=0xdead ok=false status="timeout"\n[sbtc] failed error="did not confirm"').message).toContain('0xdead');
   });
 
   it('converts whole tokens to micro units', () => {
