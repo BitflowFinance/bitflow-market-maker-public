@@ -1,0 +1,1013 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { describe, expect, it } from 'vitest';
+import { BridgeClient, EmilyRecord, EthDeposit, btcToSats, reclaimKeyOf, withdrawFeeOf, xOnlyKey } from '../src/console/bridge';
+import { depositOfLogs } from '../src/console/usdcLive';
+import { ethAddressOf, ethRecipientOf, stacksRecipientOf, usdcToMicro } from '../src/usdcx';
+import { btcRecipientOf } from '../src/sbtc';
+import { demoBridge } from '../src/console/bridgeDemo';
+import { bookOf, humanReason, parseLogLine, validateSettings } from '../src/console/model';
+import { decimalToMicro } from '../src/console/money';
+import { handleConsole, RequestHeaders } from '../src/console/server';
+import { ConsoleHost, ConsoleStore, HttpError, manualOutcome, withdrawOutcome } from '../src/console/store';
+import { accountOf } from '../src/console/phrase';
+import { createWallet } from '../src/console/wallet';
+import { checkMemo, checkPayoutAddress, stxSweepAmount } from '../src/payout';
+
+const LOCAL = { host: '127.0.0.1:4173', contentType: 'application/json' };
+const PAGE = { host: '127.0.0.1:5191', origin: 'http://127.0.0.1:5191', secFetchSite: 'same-origin', contentType: 'application/json' };
+
+class MemHost implements ConsoleHost {
+  aliveIds = new Set<number>();
+  seq = 1000;
+  manual: string[][] = [];
+  root = '';
+  dataDirAtSpawn: boolean[] = [];
+
+  spawn(): number {
+    if (this.root) this.dataDirAtSpawn.push(existsSync(join(this.root, 'data')));
+    this.seq += 1;
+    this.aliveIds.add(this.seq);
+    return this.seq;
+  }
+
+  stop(pid: number): void {
+    this.aliveIds.delete(pid);
+  }
+
+  alive(pid: number): boolean {
+    return this.aliveIds.has(pid);
+  }
+
+  manualOutput = 'manual ok';
+  manualGate: Promise<void> | null = null;
+
+  async runManual(_profile: string, args: string[], opts?: { onOutput?: (text: string) => void }): Promise<string> {
+    this.manual.push(args);
+    if (this.manualGate) await this.manualGate;
+    if (opts?.onOutput) opts.onOutput(this.manualOutput);
+    return this.manualOutput;
+  }
+
+  readRemote(): Promise<{ history: []; log: string }> {
+    return Promise.resolve({ history: [], log: '' });
+  }
+}
+
+const fakeBridge = () => {
+  const state = {
+    signers: reclaimKeyOf(createWallet().key),
+    utxos: new Map<string, Array<{ txid: string; vout: number; value: number; confirmed: boolean }>>(),
+    emily: new Map<string, EmilyRecord>(),
+    withdrawals: new Map<string, EmilyRecord>(),
+    registered: [] as string[],
+    rate: 2,
+    ethReceipts: new Map<string, EthDeposit>(),
+    mints: [] as Array<{ address: string; amount: number; txid: string }>,
+    payouts: [] as Array<{ address: string; value: number; ethTxid: string; block?: number }>,
+    ethHead: 21_000_000,
+  };
+  const client: BridgeClient = {
+    signersKey: () => Promise.resolve(state.signers),
+    utxos: (address) => Promise.resolve(state.utxos.get(address) || []),
+    register: (deposit) => {
+      const key = `${deposit.txid}:${deposit.vout}`;
+      state.registered.push(key);
+      const record: EmilyRecord = { status: 'pending', message: '', btcTxid: null, stacksTxid: null, requestId: null };
+      state.emily.set(key, record);
+      return Promise.resolve(record);
+    },
+    deposit: (txid, vout) => Promise.resolve(state.emily.get(`${txid}:${vout}`) || null),
+    withdrawal: (_sender, stacksTxid) => Promise.resolve(state.withdrawals.get(stacksTxid) || null),
+    feeRate: () => Promise.resolve(state.rate),
+    limits: () => Promise.resolve({ minDepositSats: 10_000, maxWithdrawSats: 5_000_000_000 }),
+    usdc: {
+      ethHead: () => Promise.resolve(state.ethHead),
+      deposit: (ethTxid) => Promise.resolve(state.ethReceipts.get(ethTxid) || null),
+      findMint: (address, amount, _since, skip) =>
+        Promise.resolve(state.mints.find((m) => m.address === address && m.amount === amount && !skip.includes(m.txid))?.txid || null),
+      // Like the live client: one window of at most 4000 blocks from `from`, capped at the head.
+      findPayout: (address, from, min, max, skip) => {
+        const to = Math.min(state.ethHead, from + 4000);
+        const found = state.payouts.find(
+          (p) => p.address === address && p.value >= min && p.value <= max && !skip.includes(p.ethTxid) && (p.block ?? from) >= from && (p.block ?? from) <= to,
+        );
+        return Promise.resolve({ found: found ? { ethTxid: found.ethTxid, value: found.value } : null, scannedTo: to });
+      },
+      minWithdraw: () => Promise.resolve(4_800_000),
+    },
+  };
+  return { client, state };
+};
+
+const boot = () => {
+  const root = mkdtempSync(join(tmpdir(), 'mm-ui-'));
+  const host = new MemHost();
+  host.root = root;
+  const bridge = fakeBridge();
+  const now = Date.parse('2026-01-01T00:00:00.000Z');
+  const store = new ConsoleStore(root, host, bridge.client, now);
+  const call = async (method: string, path: string, body?: unknown, headers: RequestHeaders = LOCAL) => {
+    try {
+      return await handleConsole(store, { method, path, headers, body: body ? JSON.stringify(body) : '' }, now);
+    } catch (err) {
+      if (err instanceof HttpError) return { status: err.status, body: { error: err.code, message: err.message } };
+      throw err;
+    }
+  };
+  return { root, host, bridge, now, store, call };
+};
+
+describe('local console', () => {
+  it('answers the page and local tools without a code', async () => {
+    const { call } = boot();
+    const page = await call('GET', '/api/fleet', undefined, { host: '127.0.0.1:5191', origin: 'http://127.0.0.1:5191', secFetchSite: 'same-origin' });
+    expect(page.status).toBe(200);
+    const agent = await call('POST', '/api/bots/preview-sbtc/pause', undefined, { host: 'localhost:4173', contentType: 'application/json' });
+    expect(agent.status).toBe(200);
+  });
+
+  it('refuses calls from other websites and non-local hostnames', async () => {
+    const { call } = boot();
+    const otherSite = await call('POST', '/api/bots/preview-sbtc/pause', undefined, {
+      host: '127.0.0.1:5191',
+      origin: 'https://evil.example',
+      contentType: 'application/json',
+    });
+    expect(otherSite.status).toBe(403);
+    const fetchMeta = await call('GET', '/api/fleet', undefined, { host: '127.0.0.1:5191', secFetchSite: 'cross-site' });
+    expect(fetchMeta.status).toBe(403);
+    const rebound = await call('GET', '/api/fleet', undefined, { host: 'evil.example:4173' });
+    expect(rebound.status).toBe(403);
+    const formPost = await call('POST', '/api/bots/preview-sbtc/pause', undefined, { host: '127.0.0.1:4173', contentType: 'text/plain' });
+    expect(formPost.status).toBe(415);
+  });
+
+  it('starts with preview bots that have fake funds and no wallet', async () => {
+    const { call } = boot();
+    const res = await call('GET', '/api/fleet');
+    expect(res.status).toBe(200);
+    const body = res.body as { bots: Array<{ id: string; preview: boolean; address: string | null; keySet: boolean; walletBase: number }> };
+    const preview = body.bots.find((bot) => bot.id === 'preview-sbtc');
+    expect(preview?.preview).toBe(true);
+    expect(preview?.address).toBeNull();
+    expect(preview?.keySet).toBe(false);
+    expect(preview?.walletBase).toBeGreaterThan(0);
+  });
+
+  it('pauses every running bot at once and leaves stopped ones alone', async () => {
+    const { call } = boot();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: createWallet().key });
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: createWallet().key });
+    await call('POST', '/api/bots/sbtc/resume');
+    await call('POST', '/api/bots/stx/stop');
+    const bot = async (id: string) => (await call('GET', `/api/bots/${id}`)).body as { running: boolean; paused: boolean };
+    expect(await bot('sbtc')).toMatchObject({ running: true, paused: false });
+
+    expect((await call('POST', '/api/pause-all')).body).toEqual({ paused: ['sbtc'], failed: [] });
+    expect(await bot('sbtc')).toMatchObject({ paused: true });
+    expect(await bot('stx')).toMatchObject({ running: false, paused: false });
+    expect((await call('POST', '/api/pause-all')).body).toEqual({ paused: [], failed: [] });
+  });
+
+  it('keeps preview balances when paused', async () => {
+    const { call } = boot();
+    const before = (await call('GET', '/api/bots/preview-sbtc')).body as { walletBase: number };
+    const paused = await call('POST', '/api/bots/preview-sbtc/pause');
+    const bot = paused.body as { decision: string; holdingsCarried: boolean; walletBase: number; reasonRaw: string; reason: { kind: string } };
+    expect(bot.decision).toBe('frozen');
+    expect(bot.reasonRaw).toBe('kill_switch');
+    expect(bot.reason.kind).toBe('paused');
+    expect(bot.holdingsCarried).toBe(true);
+    expect(bot.walletBase).toBe(before.walletBase);
+  });
+
+  it('labels a preview by what it is doing, since the badge already says preview', async () => {
+    const { call } = boot();
+    const label = async (path: string) => ((await call('POST', path)).body as { state: { label: string } }).state.label;
+    expect(((await call('GET', '/api/bots/preview-sbtc')).body as { state: { label: string } }).state.label).toBe('Running');
+    expect(await label('/api/bots/preview-sbtc/pause')).toBe('Paused');
+    expect(await label('/api/bots/preview-sbtc/stop')).toBe('Stopped');
+  });
+
+  it('does not call an empty book zero', () => {
+    const book = bookOf([]);
+    expect(book.real.label).toBe('No bots running');
+    expect(book.real.value).toBeNull();
+  });
+
+  it('writes a new dry-run bot without returning the private key', async () => {
+    const { call, root } = boot();
+    const wallet = createWallet();
+    const created = await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: wallet.key });
+    expect(created.status).toBe(200);
+    const text = JSON.stringify(created.body);
+    expect(text).not.toContain(wallet.key);
+    expect(text).toContain(wallet.address);
+    const env = readFileSync(join(root, '.env.sbtc'), 'utf8');
+    expect(env).toContain(`SIGNER_KEY=${wallet.key}`);
+    expect(env).toContain('EXECUTION_MODE=dry_run');
+    const bot = (created.body as { bot: { mode: string; keySet: boolean; needs: Array<{ id: string }> } }).bot;
+    expect(bot.mode).toBe('dry_run');
+    expect(bot.keySet).toBe(true);
+    expect(bot.needs.some((item) => item.id.endsWith(':nocheck'))).toBe(true);
+  });
+
+  it('refuses a second bot on the same wallet, and flags two that share one anyway', async () => {
+    const { call, root } = boot();
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: wallet.key });
+    const second = await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: wallet.key });
+    expect(second.status).toBe(409);
+    // A hand-edited env file can still share one; the checklist catches that.
+    writeFileSync(join(root, '.env.stx'), `SIGNER_KEY=${wallet.key}\nSIGNER_ADDRESS=${wallet.address}\n`);
+    const fleet = await call('GET', '/api/fleet');
+    const bots = (fleet.body as { bots: Array<{ id: string; checklist: Array<{ id: string; ok: boolean }> }> }).bots;
+    const real = bots.find((bot) => bot.id === 'sbtc');
+    expect(real?.checklist.find((item) => item.id === 'one-wallet')?.ok).toBe(false);
+  });
+
+  it('refuses manual trades in dry run, and a withdraw that is not paused', async () => {
+    const { call, host, root } = boot();
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: wallet.key });
+    const dry = await call('POST', '/api/bots/sbtc/manual', {
+      action: 'swap',
+      amount: '1',
+      side: 'quote',
+      acknowledged: true,
+      poolName: 'sBTC / USDCx',
+    });
+    expect(dry.status).toBe(409);
+    expect((dry.body as { error: string }).error).toBe('dry_run');
+    expect(host.manual.length).toBe(0);
+
+    const envPath = join(root, '.env.sbtc');
+    const env = readFileSync(envPath, 'utf8').replace('EXECUTION_MODE=dry_run', 'EXECUTION_MODE=live');
+    writeFileSync(envPath, env);
+    for (const action of [{ action: 'withdraw', pct: 100 }, { action: 'swap', side: 'quote', amount: '1' }, { action: 'add', xAmount: '0.001', yAmount: '1' }]) {
+      const early = await call('POST', '/api/bots/sbtc/manual', { ...action, acknowledged: true, poolName: 'sBTC / USDCx' });
+      expect((early.body as { error: string }).error).toBe('pause_first');
+    }
+
+    // A stopped bot has no loop to race, so it needs no pause.
+    await call('POST', '/api/bots/sbtc/stop');
+    expect((await call('POST', '/api/bots/sbtc/manual', { action: 'swap', side: 'quote', amount: '1', acknowledged: true, poolName: 'sBTC / USDCx' })).status).toBe(200);
+    await call('POST', '/api/bots/sbtc/start');
+    await call('POST', '/api/bots/sbtc/pause');
+    const sent = await call('POST', '/api/bots/sbtc/manual', {
+      action: 'withdraw',
+      pct: 100,
+      acknowledged: true,
+      poolName: 'sBTC / USDCx',
+    });
+    expect(sent.status).toBe(200);
+    expect(host.manual[host.manual.length - 1]).toEqual(['--withdraw-liquidity', '--pct', '100']);
+  });
+
+  it('asks before leaving dry run, then restarts', async () => {
+    const { call, host, root } = boot();
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: wallet.key });
+    writeFileSync(
+      join(root, 'data', 'metrics.sbtc.jsonl'),
+      `${JSON.stringify({ t: '2026-01-01T00:00:00.000Z', decision: 'hold', reason: 'in_range', activeBinPrice: 100000, portfolioValue: 10, walletBase: 0, walletQuote: 10, ownedBase: 0, ownedQuote: 0 })}\n`,
+    );
+    const blocked = await call('POST', '/api/bots/sbtc/settings', { settings: { EXECUTION_MODE: 'live' } });
+    expect(blocked.status).toBe(409);
+    expect((blocked.body as { error: string }).error).toBe('confirm_live');
+    const before = host.aliveIds.size;
+    const live = await call('POST', '/api/bots/sbtc/settings', {
+      settings: { EXECUTION_MODE: 'live' },
+      confirmLive: true,
+      poolName: 'sBTC / USDCx',
+    });
+    expect(live.status).toBe(200);
+    expect((live.body as { mode: string }).mode).toBe('live');
+    expect(host.aliveIds.size).toBe(before);
+    const secret = await call('POST', '/api/bots/sbtc/settings', { settings: { SIGNER_KEY: 'nope' } });
+    expect(secret.status).toBe(400);
+  });
+
+  it('resets profit by touching the request file', async () => {
+    const { call, root } = boot();
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: wallet.key });
+    const res = await call('POST', '/api/bots/stx/baseline-reset');
+    expect(res.status).toBe(200);
+    expect(readFileSync(join(root, 'data', 'metrics-baseline.stx.json.reset'), 'utf8').length).toBeGreaterThan(0);
+  });
+
+  it('makes one deposit address per bot, refunding to the bot key', async () => {
+    const { call, root, bridge } = boot();
+    expect((await call('POST', '/api/bots/preview-sbtc/bridge-deposit')).status).toBe(409);
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: wallet.key });
+    const first = await call('POST', '/api/bots/sbtc/bridge-deposit');
+    expect(first.status).toBe(200);
+    const view = first.body as { deposit: { address: string; minSats: number; feeSats: number }; stacksAddress: string };
+    expect(view.deposit.address).toMatch(/^bc1p/);
+    expect(view.deposit.minSats).toBe(10_000);
+    expect(view.deposit.feeSats).toBe(600);
+    expect(view.stacksAddress).toBe(wallet.address);
+    const again = (await call('POST', '/api/bots/sbtc/bridge-deposit')).body as { deposit: { address: string } };
+    expect(again.deposit.address).toBe(view.deposit.address);
+    const file = readFileSync(join(root, 'data', 'bridge.sbtc.json'), 'utf8');
+    expect(file).not.toContain(wallet.key.slice(0, 64));
+    expect(JSON.parse(file).addresses[0].reclaimKey).toBe(reclaimKeyOf(wallet.key));
+    expect(JSON.stringify(first.body)).not.toContain(wallet.key.slice(0, 64));
+
+    // A signers' key rotation retires the address: the view asks for a new one.
+    bridge.state.signers = reclaimKeyOf(createWallet().key);
+    expect(((await call('GET', '/api/bots/sbtc/bridge')).body as { deposit: unknown }).deposit).toBeNull();
+    const rotated = (await call('POST', '/api/bots/sbtc/bridge-deposit')).body as { deposit: { address: string } };
+    expect(rotated.deposit.address).not.toBe(view.deposit.address);
+  });
+
+  it('finds BTC at the deposit address and registers it once', async () => {
+    const { call, store, bridge } = boot();
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: wallet.key });
+    const address = ((await call('POST', '/api/bots/sbtc/bridge-deposit')).body as { deposit: { address: string } }).deposit.address;
+    await store.syncBridges(new Date());
+    expect(((await call('GET', '/api/bots/sbtc/bridge')).body as { transfers: unknown[] }).transfers).toEqual([]);
+
+    const txid = 'ab'.repeat(32);
+    bridge.state.utxos.set(address, [{ txid, vout: 1, value: 250_000, confirmed: false }]);
+    await store.syncBridges(new Date());
+    await store.syncBridges(new Date());
+    expect(bridge.state.registered).toEqual([`${txid}:1`]);
+    let transfers = ((await call('GET', '/api/bots/sbtc/bridge')).body as { transfers: Array<{ kind: string; asset: string; status: string; amount: number; stacksTxid: string | null }> }).transfers;
+    expect(transfers).toHaveLength(1);
+    expect(transfers[0]).toMatchObject({ kind: 'deposit', asset: 'btc', status: 'processing', amount: 250_000 });
+
+    bridge.state.emily.set(`${txid}:1`, { status: 'confirmed', message: '', btcTxid: 'cd'.repeat(32), stacksTxid: '0x01', requestId: null });
+    await store.syncBridges(new Date());
+    transfers = ((await call('GET', '/api/bots/sbtc/bridge')).body as typeof transfers & { transfers: typeof transfers }).transfers;
+    expect(transfers[0]).toMatchObject({ status: 'done', stacksTxid: '0x01' });
+
+    const all = (await call('GET', '/api/bridge')).body as { transfers: Array<{ botId: string; status: string }> };
+    expect(all.transfers).toEqual([expect.objectContaining({ botId: 'sbtc', status: 'done' })]);
+
+    // Survives a console restart.
+    const reopened = new ConsoleStore(store.root, store.host, bridge.client, Date.now());
+    const view = await reopened.bridgeView('sbtc');
+    expect(view.transfers[0].status).toBe('done');
+    expect(view.deposit?.address).toBe(address);
+  });
+
+  it('withdraws sBTC through the bot runner, only from the page and only while paused', async () => {
+    const { call, store, host, bridge } = boot();
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: wallet.key });
+    const to = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq';
+    const body = { amount: '0.001', btcAddress: to, acknowledged: true, poolName: 'sBTC / USDCx' };
+    const err = async (payload: unknown) => ((await call('POST', '/api/bots/sbtc/bridge-withdraw', payload, PAGE)).body as { error: string }).error;
+
+    expect((await call('POST', '/api/bots/sbtc/bridge-withdraw', body)).status).toBe(403);
+    expect(await err({ ...body, btcAddress: 'tb1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq' })).toBe('btc_address');
+    expect(await err({ ...body, amount: '0.00001' })).toBe('amount');
+    expect(await err({ ...body, amount: '1.123456789' })).toBe('amount');
+    expect(await err({ ...body, poolName: 'nope' })).toBe('confirm');
+    await call('POST', '/api/bots/sbtc/resume');
+    expect(await err(body)).toBe('pause_first');
+    await call('POST', '/api/bots/sbtc/pause');
+
+    let release = (): void => undefined;
+    host.manualGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    host.manualOutput = '[sbtc] step=request tx=0xabc ok=true status="success"\n[sbtc] done tx=0xabc\n';
+    const started = await call('POST', '/api/bots/sbtc/bridge-withdraw', body, PAGE);
+    expect(started.status).toBe(200);
+    expect((started.body as { transfers: Array<{ status: string }> }).transfers[0].status).toBe('sending');
+    expect(host.manual[host.manual.length - 1]).toEqual(['--sbtc-withdraw', '--amount', '100000', '--to', to, '--max-fee', String(withdrawFeeOf(2))]);
+    // Nothing else may move funds while the request is being signed.
+    expect(((await call('POST', '/api/bots/sbtc/cash-out', { acknowledged: true, poolName: 'sBTC / USDCx' })).body as { error: string }).error).toBe('bridging');
+    expect(await err(body)).toBe('bridging');
+
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    let view = await store.bridgeView('sbtc');
+    expect(view.transfers[0]).toMatchObject({ kind: 'withdraw', status: 'processing', stacksTxid: '0xabc', btcAddress: to });
+    expect(view.withdraw.blocked).toBeNull();
+
+    bridge.state.withdrawals.set('0xabc', { status: 'confirmed', message: '', btcTxid: 'ef'.repeat(32), stacksTxid: null, requestId: 7 });
+    await store.syncBridges(new Date());
+    view = await store.bridgeView('sbtc');
+    expect(view.transfers[0]).toMatchObject({ status: 'done', btcTxid: 'ef'.repeat(32), requestId: 7 });
+  });
+
+  it('follows a USDC deposit from the Ethereum receipt to the Stacks mint', async () => {
+    const { call, store, bridge } = boot();
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: wallet.key });
+    const view = (await call('GET', '/api/bots/stx/bridge')).body as { stacksAddress: string; usdc: { recipient: string } };
+    expect(view.usdc.recipient).toBe(stacksRecipientOf(view.stacksAddress));
+    const report = (ethTxid: string, amount = '25') => call('POST', '/api/bots/stx/bridge-usdc-deposit', { ethTxid, amount });
+    expect((await report('0x1234')).status).toBe(400);
+    expect((await report(`0x${'aa'.repeat(32)}`, '1.1234567')).status).toBe(400);
+
+    const ours = `0x${'aa'.repeat(32)}`;
+    const elsewhere = `0x${'bb'.repeat(32)}`;
+    const reverted = `0x${'cc'.repeat(32)}`;
+    await report(ours);
+    await report(ours);
+    await report(elsewhere);
+    await report(reverted);
+    await store.syncBridges(new Date());
+    type T = { id: string; status: string; amount: number; stacksTxid: string | null; message: string };
+    const list = async () => ((await call('GET', '/api/bots/stx/bridge')).body as { transfers: T[] }).transfers;
+    const byTx = async (tx: string) => (await list()).find((t) => t.id === `eth-${tx}`) as T;
+    expect(await list()).toHaveLength(3);
+    expect((await byTx(ours)).status).toBe('sent');
+
+    bridge.state.ethReceipts.set(ours, { ok: true, recipient: view.usdc.recipient, domain: 10003, value: 24_500_000 });
+    bridge.state.ethReceipts.set(elsewhere, { ok: true, recipient: stacksRecipientOf('SPWVCRSE70G9W9JQYHHHW23R2A695RSM5HAJHW0H'), domain: 10003, value: 25_000_000 });
+    bridge.state.ethReceipts.set(reverted, { ok: false });
+    await store.syncBridges(new Date());
+    // The receipt's amount wins over what the page reported.
+    expect(await byTx(ours)).toMatchObject({ status: 'processing', amount: 24_500_000 });
+    expect((await byTx(elsewhere)).status).toBe('failed');
+    expect((await byTx(elsewhere)).message).toContain('different Stacks address');
+    expect((await byTx(reverted)).status).toBe('failed');
+
+    bridge.state.mints.push({ address: view.stacksAddress, amount: 24_500_000, txid: '0xmint' });
+    await store.syncBridges(new Date());
+    expect(await byTx(ours)).toMatchObject({ status: 'done', stacksTxid: '0xmint' });
+  });
+
+  it('withdraws USDCx to Ethereum only from the page, and follows the payout', async () => {
+    const { call, store, host, bridge } = boot();
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: createWallet().key });
+    const to = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed';
+    const body = { amount: '25', ethAddress: to.toLowerCase(), acknowledged: true, poolName: 'STX / USDCx' };
+    const err = async (payload: unknown) => ((await call('POST', '/api/bots/stx/bridge-usdc-withdraw', payload, PAGE)).body as { error: string }).error;
+
+    expect((await call('POST', '/api/bots/stx/bridge-usdc-withdraw', body)).status).toBe(403);
+    expect(await err({ ...body, ethAddress: '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeD' })).toBe('eth_address');
+    expect(await err({ ...body, ethAddress: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq' })).toBe('eth_address');
+    expect(await err({ ...body, amount: '4' })).toBe('amount');
+    expect(await err({ ...body, poolName: 'nope' })).toBe('confirm');
+    await call('POST', '/api/bots/stx/resume');
+    expect(await err(body)).toBe('pause_first');
+    await call('POST', '/api/bots/stx/pause');
+
+    host.manualOutput = '[usdcx] step=burn tx=0xb0b ok=true status="success"\n[usdcx] done tx=0xb0b\n';
+    expect((await call('POST', '/api/bots/stx/bridge-usdc-withdraw', body, PAGE)).status).toBe(200);
+    // The checksum form goes to the runner, whatever case was typed.
+    expect(host.manual[host.manual.length - 1]).toEqual(['--usdcx-withdraw', '--amount', '25000000', '--to', to]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    let view = await store.bridgeView('stx');
+    expect(view.transfers[0]).toMatchObject({ kind: 'withdraw', asset: 'usdc', status: 'processing', stacksTxid: '0xb0b', ethAddress: to, ethBlock: 21_000_000 });
+
+    // A payout far below the burn is someone else's.
+    bridge.state.payouts.push({ address: to, value: 5_000_000, ethTxid: '0xother' });
+    await store.syncBridges(new Date());
+    expect((await store.bridgeView('stx')).transfers[0].status).toBe('processing');
+    // Paid 13,000 blocks later while the console was closed: found by walking forward window by window.
+    bridge.state.payouts.push({ address: to, value: 23_000_000, ethTxid: '0xpay', block: 21_013_000 });
+    bridge.state.ethHead = 21_020_000;
+    await store.syncBridges(new Date());
+    expect((await store.bridgeView('stx')).transfers[0]).toMatchObject({ status: 'processing', ethScanned: 21_004_000 });
+    for (let pass = 0; pass < 4; pass += 1) await store.syncBridges(new Date());
+    view = await store.bridgeView('stx');
+    expect(view.transfers[0]).toMatchObject({ status: 'done', ethTxid: '0xpay', received: 23_000_000 });
+  });
+
+  it('reads files written before USDC bridging', async () => {
+    const { call, root, store } = boot();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: createWallet().key });
+    const old = { addresses: [], transfers: [{ id: 'dep-x-0', kind: 'deposit', status: 'done', amountSats: 70_000, message: '', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', btcTxid: 'x', stacksTxid: null }] };
+    writeFileSync(join(root, 'data', 'bridge.sbtc.json'), JSON.stringify(old));
+    const view = await store.bridgeView('sbtc');
+    expect(view.transfers[0]).toMatchObject({ asset: 'btc', amount: 70_000 });
+  });
+
+  it('encodes USDCx addresses for both chains', () => {
+    // A real mainnet deposit: this recipient word minted 10 USDCx to SPWVCR…HW0H.
+    expect(stacksRecipientOf('SPWVCRSE70G9W9JQYHHHW23R2A695RSM5HAJHW0H')).toBe('0x00000000000000000000001639b6632e38209e2657f4631e0878128c92e3342c');
+    // EIP-55's own test vectors.
+    expect(ethAddressOf('0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed')).toBe('0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed');
+    expect(ethAddressOf('0xFB6916095CA1DF60BB79CE92CE3EA74C37C5D359')).toBe('0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359');
+    expect(() => ethAddressOf('0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeD')).toThrow('typo');
+    expect(() => ethAddressOf('0x5aaeb6053f3e94c9b9a09f33669435e7ef1bea')).toThrow('not an Ethereum address');
+    expect(Buffer.from(ethRecipientOf('0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed')).toString('hex')).toBe(`${'00'.repeat(12)}5aaeb6053f3e94c9b9a09f33669435e7ef1beaed`);
+    expect(usdcToMicro('12.5')).toBe(12_500_000);
+    expect(usdcToMicro('0.000001')).toBe(1);
+    expect(usdcToMicro('1.0000001')).toBeNull();
+    expect(usdcToMicro('0')).toBeNull();
+    expect(withdrawOutcome('[usdcx] step=burn tx=0xfeed ok=true status="success"\n[usdcx] done tx=0xfeed', 'usdc')).toMatchObject({ status: 'processing', stacksTxid: '0xfeed' });
+    expect(withdrawOutcome('[usdcx] failed error="the wallet holds 3"', 'usdc')).toMatchObject({ status: 'failed', message: expect.stringContaining('Nothing was sent') });
+  });
+
+  it('reads the xReserve deposit event of a real receipt', () => {
+    // Ethereum tx 0x548f3804…72f7: 10 USDC to SPWVCR…HW0H.
+    const log = {
+      address: '0x8888888199b2df864bf678259607d6d5ebb4e3ce',
+      topics: [
+        '0x2eef4ec627e0f99d1cc55f26e234a6066090b7bc0b3f61245f1f2d7c91d3e563',
+        '0x000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+        '0x0000000000000000000000005347979e2a4e5943960dd1e252b6cbfe93829bd2',
+        '0x00000000000000000000001639b6632e38209e2657f4631e0878128c92e3342c',
+      ],
+      data: `0x${['989680', '2713', '0616440caf0bbc800a33993ea85c2392aeb53696608b057573646378', '0', 'a0', '0'].map((w) => w.padStart(64, '0')).join('')}`,
+      transactionHash: '0x548f3804f47e02bc23617cf3135f02e26fbfb5c741ffc95fbd5218048fa872f7',
+    };
+    expect(depositOfLogs([log])).toEqual({ ok: true, recipient: stacksRecipientOf('SPWVCRSE70G9W9JQYHHHW23R2A695RSM5HAJHW0H'), domain: 10003, value: 10_000_000 });
+    expect(depositOfLogs([{ ...log, address: '0x0000000000000000000000000000000000000001' }])).toBeNull();
+  });
+
+  it('creates the data folder before starting a new bot', async () => {
+    const { call, host } = boot();
+    const wallet = createWallet();
+    const created = await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: wallet.key });
+    expect(created.status).toBe(200);
+    expect(host.dataDirAtSpawn).toEqual([true]);
+  });
+
+  it('keeps preview funds out of the real book', async () => {
+    const { call, root } = boot();
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: wallet.key });
+    writeFileSync(
+      join(root, 'data', 'metrics.sbtc.jsonl'),
+      `${JSON.stringify({ t: '2026-01-01T00:00:00.000Z', decision: 'hold', reason: 'in range; holding shaped position (f=0.380)', activeBinPrice: 100000, portfolioValue: 12.5, walletBase: 0, walletQuote: 12.5, ownedBase: 0, ownedQuote: 0 })}\n`,
+    );
+    const fleet = await call('GET', '/api/fleet');
+    const book = (fleet.body as { book: { real: { value: number; botCount: number }; preview: { botCount: number; value: number } } }).book;
+    expect(book.real.botCount).toBe(1);
+    expect(book.real.value).toBeCloseTo(12.5, 6);
+    expect(book.preview.botCount).toBe(2);
+    expect(book.preview.value).toBeGreaterThan(100);
+  });
+
+  it('never lists preview bots under Needs you', async () => {
+    const { call } = boot();
+    await call('POST', '/api/bots/preview-sbtc/stop');
+    const fleet = await call('GET', '/api/fleet');
+    expect((fleet.body as { needs: unknown[] }).needs).toEqual([]);
+  });
+
+  it('flags low gas and a stopped bot once, not twice', async () => {
+    const { call, root, host } = boot();
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: wallet.key });
+    host.aliveIds.clear();
+    let fleet = await call('GET', '/api/fleet');
+    let needs = (fleet.body as { needs: Array<{ id: string }> }).needs.map((item) => item.id);
+    expect(needs).toEqual(['sbtc:stopped']);
+
+    await call('POST', '/api/bots/sbtc/start');
+    writeFileSync(
+      join(root, 'data', 'metrics.sbtc.jsonl'),
+      `${JSON.stringify({ t: '2026-01-01T00:00:00.000Z', decision: 'hold', reason: 'wallet_stx=0.01 cannot cover 3-step fees (~0.15); top up STX', activeBinPrice: 100000, portfolioValue: 5, walletBase: 0, walletQuote: 5, ownedBase: 0, ownedQuote: 0 })}\n`,
+    );
+    fleet = await call('GET', '/api/fleet');
+    needs = (fleet.body as { needs: Array<{ id: string }> }).needs.map((item) => item.id);
+    expect(needs).toEqual(['sbtc:gas']);
+  });
+
+  it('marks pools that already have a bot', async () => {
+    const { call } = boot();
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: wallet.key });
+    const res = await call('GET', '/api/profiles');
+    const profiles = (res.body as { profiles: Array<{ id: string; taken: boolean }> }).profiles;
+    expect(profiles.find((item) => item.id === 'stx')?.taken).toBe(true);
+    expect(profiles.find((item) => item.id === 'sbtc')?.taken).toBe(false);
+  });
+
+  it('explains bot reasons in plain words', () => {
+    expect(humanReason('pool/external divergence 180bps > halt 150bps', 'frozen').kind).toBe('halt');
+    expect(humanReason('reference feed stale 400000ms > halt 300000ms', 'frozen').kind).toBe('halt');
+    expect(humanReason('in range; holding shaped position (f=0.380)', 'hold').kind).toBe('holding');
+    expect(humanReason('reposition: drift 7 bins; rebuild curve on active bin 512', 'rebalance').kind).toBe('rebuild');
+    expect(humanReason('nonce gap detected (missing [4]); holding until cleared', 'hold').kind).toBe('stuck');
+    expect(humanReason('kill_switch', 'frozen').kind).toBe('paused');
+    expect(humanReason('snapshot_fetch_failed: wallet balance read failed token=SP1.usdcx: 429', 'frozen').text).toContain('wallet balance');
+  });
+
+  it('reads pretty and JSON log lines', () => {
+    const pretty = parseLogLine('\u001b[32m[10:15:02.123] INFO (4242): [index] scheduling ticks every 120000ms\u001b[39m');
+    expect(pretty).toEqual({ t: '10:15:02', level: 'info', text: '[index] scheduling ticks every 120000ms' });
+    const json = parseLogLine('{"level":40,"time":1767225600000,"msg":"[mm] low gas"}');
+    expect(json.level).toBe('warn');
+    expect(json.text).toBe('[mm] low gas');
+  });
+
+  it('rejects settings that do not make sense', () => {
+    expect(validateSettings({ CURVE_DECAY: 'abc' }, {})).toContain('CURVE_DECAY');
+    expect(validateSettings({ F_STAR: '0.6' }, { F_SOFT: '0.52', F_HARD: '0.67' })).toContain('F_STAR');
+    expect(validateSettings({ ENABLE_SWAP: 'yes' }, {})).toContain('ENABLE_SWAP');
+    expect(validateSettings({ CURVE_HALF_WIDTH_BINS: '8' }, {})).toBe('');
+  });
+
+  it('runs the bridge demo on made-up data in its own files', async () => {
+    const { call, store, root } = boot();
+    const demo = demoBridge();
+    store.bridge = demo;
+    store.bridgeDemo = demo;
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: createWallet().key });
+    const view = (await call('POST', '/api/bots/sbtc/bridge-deposit')).body as { demo: boolean; withdraw: { heldSats: number }; transfers: unknown[] };
+    expect(view.demo).toBe(true);
+    expect(view.withdraw.heldSats).toBeGreaterThan(0);
+    expect(view.transfers).toHaveLength(5);
+    expect(existsSync(join(root, 'data', 'bridge.sbtc.json'))).toBe(false);
+    await call('POST', '/api/bots/sbtc/bridge-demo-send');
+    await store.syncBridges(new Date());
+    const after = (await call('GET', '/api/bots/sbtc/bridge')).body as { transfers: Array<{ kind: string; asset: string; status: string }> };
+    expect(after.transfers[0]).toMatchObject({ kind: 'deposit', asset: 'btc', status: 'processing' });
+    await call('POST', '/api/bots/sbtc/bridge-demo-send', { asset: 'usdc' });
+    const usdc = (await call('GET', '/api/bots/sbtc/bridge')).body as { transfers: Array<{ kind: string; asset: string; status: string }> };
+    expect(usdc.transfers[0]).toMatchObject({ kind: 'deposit', asset: 'usdc', status: 'sent' });
+  });
+
+  it('refuses the demo hook outside demo mode', async () => {
+    const { call } = boot();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: createWallet().key });
+    expect((await call('POST', '/api/bots/sbtc/bridge-demo-send')).status).toBe(404);
+  });
+
+  it('reads bridge amounts, Bitcoin addresses and runner output', () => {
+    expect(btcToSats('0.0015')).toBe(150_000);
+    expect(btcToSats('1')).toBe(100_000_000);
+    expect(btcToSats('0.000000001')).toBeNull();
+    expect(btcToSats('-1')).toBeNull();
+    expect(btcToSats('0')).toBeNull();
+    expect(Array.from(btcRecipientOf('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq').version)).toEqual([4]);
+    expect(Array.from(btcRecipientOf('bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297').version)).toEqual([6]);
+    expect(Array.from(btcRecipientOf('1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2').version)).toEqual([0]);
+    expect(Array.from(btcRecipientOf('3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy').version)).toEqual([1]);
+    expect(() => btcRecipientOf('SP000')).toThrow('Bitcoin mainnet');
+    expect(xOnlyKey(`03${'ab'.repeat(32)}`)).toBe('ab'.repeat(32));
+    expect(xOnlyKey(`04${'ab'.repeat(32)}${'cd'.repeat(32)}`)).toBe('ab'.repeat(32));
+    expect(withdrawOutcome('[sbtc] failed error="the wallet holds 5 sats"')).toMatchObject({ status: 'failed', stacksTxid: null, message: expect.stringContaining('Nothing was sent') });
+    expect(withdrawOutcome('[sbtc] step=request tx=0xdead ok=false status="timeout"\n[sbtc] failed error="did not confirm"').message).toContain('0xdead');
+  });
+
+  it('converts whole tokens to micro units', () => {
+    expect(decimalToMicro('0.01', 8)).toBe('1000000');
+    expect(decimalToMicro('1.5', 6)).toBe('1500000');
+  });
+
+  it('upgrades a legacy pool alias in an existing env file to the contract id', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mm-ui-'));
+    writeFileSync(join(root, '.env.sbtc'), 'POOL_ID=dlmm_1\nEXECUTION_MODE=dry_run\n');
+    new ConsoleStore(root, new MemHost(), fakeBridge().client, Date.now());
+    const env = readFileSync(join(root, '.env.sbtc'), 'utf8');
+    expect(env).toContain('POOL_ID=SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-pool-sbtc-usdcx-v-1-bps-10');
+    expect(env).toContain('EXECUTION_MODE=dry_run');
+  });
+
+  it('keeps an old STX file on the pool it named, while new STX bots get the main pool', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mm-ui-'));
+    writeFileSync(join(root, '.env.stx'), 'POOL_ID=dlmm_14\n');
+    new ConsoleStore(root, new MemHost(), fakeBridge().client, Date.now());
+    expect(readFileSync(join(root, '.env.stx'), 'utf8')).toContain('dlmm-pool-stx-usdcx-v-2-bps-10');
+
+    writeFileSync(join(root, '.env.stx'), 'POOL_ID=dlmm_3\n');
+    new ConsoleStore(root, new MemHost(), fakeBridge().client, Date.now());
+    expect(readFileSync(join(root, '.env.stx'), 'utf8')).toContain('dlmm-pool-stx-usdcx-v-1-bps-10');
+
+    const fresh = boot();
+    await fresh.call('POST', '/api/bots', { profile: 'stx', wallet: 'create' });
+    expect(readFileSync(join(fresh.root, '.env.stx'), 'utf8')).toMatch(/^POOL_ID=SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD\.dlmm-pool-stx-usdcx-v-1-bps-10$/m);
+  });
+
+  it('reads a manual run’s outcome from its output instead of assuming success', () => {
+    const fail = (text: string) => `[10:00:00.000] INFO: [index] starting\n\u001b[31m[10:00:01.000] ERROR: [index] ${text}\u001b[39m\n`;
+    expect(manualOutcome(fail('withdraw liquidity prepare failed error="no withdrawable positions found"'))).toEqual({ ok: false, message: 'There is nothing in the pool to withdraw.' });
+    expect(manualOutcome(fail('fatal error="stx cannot cover tx fee balance=0 fee=0.05"')).message).toContain('enough STX');
+    expect(manualOutcome('[10:00:02.000] INFO: [index] swap tx=0xabc ok=false status="abort_by_post_condition"\n').ok).toBe(false);
+    expect(manualOutcome('[10:00:02.000] INFO: [index] withdraw_liquidity tx=0xabc ok=true status="success"\n')).toEqual({ ok: true, message: 'withdraw_liquidity tx=0xabc ok=true status="success"' });
+    expect(manualOutcome('').ok).toBe(false);
+  });
+
+  it('sets API keys only from the page and never returns them', async () => {
+    const { call, root } = boot();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: createWallet().key });
+    const key = 'hiro_live_abcdef1234567890';
+    expect((await call('POST', '/api/bots/sbtc/api-key', { name: 'STACKS_NODE_KEY', value: key })).status).toBe(403);
+    expect((await call('POST', '/api/bots/sbtc/api-key', { name: 'SIGNER_KEY', value: key }, PAGE)).status).toBe(400);
+    expect((await call('POST', '/api/bots/sbtc/api-key', { name: 'STACKS_NODE_KEY', value: 'has spaces in it' }, PAGE)).status).toBe(400);
+    const saved = await call('POST', '/api/bots/sbtc/api-key', { name: 'STACKS_NODE_KEY', value: key }, PAGE);
+    expect((saved.body as { keysSet: Record<string, boolean> }).keysSet.STACKS_NODE_KEY).toBe(true);
+    expect(JSON.stringify((await call('GET', '/api/fleet')).body)).not.toContain(key);
+    expect(readFileSync(join(root, '.env.sbtc'), 'utf8')).toContain(`STACKS_NODE_KEY=${key}`);
+    expect((await call('POST', '/api/bots/sbtc/settings', { settings: { STACKS_NODE_KEY: 'x' } })).status).toBe(400);
+  });
+
+  it('runs two bots on one pair, each with its own id, files and port', async () => {
+    const { call, root } = boot();
+    const a = createWallet();
+    const b = createWallet();
+    const first = (await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: a.key })).body as { bot: { id: string } };
+    const second = (await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: b.key, name: 'Wide sBTC' })).body as { bot: { id: string; name: string; profile: string } };
+    expect(first.bot.id).toBe('sbtc');
+    expect(second.bot.id).toBe('sbtc-2');
+    expect(second.bot.name).toBe('Wide sBTC');
+    expect(second.bot.profile).toBe('sbtc');
+    const envA = readFileSync(join(root, '.env.sbtc'), 'utf8');
+    const envB = readFileSync(join(root, '.env.sbtc-2'), 'utf8');
+    expect(envB).toContain('BOT_PROFILE=sbtc');
+    expect(envB).toContain('PID_FILE=data/bot.sbtc-2.pid');
+    expect(envA.match(/METRICS_HTTP_PORT=(\d+)/)?.[1]).not.toBe(envB.match(/METRICS_HTTP_PORT=(\d+)/)?.[1]);
+    const fleet = (await call('GET', '/api/fleet')).body as { bots: Array<{ id: string }> };
+    expect(fleet.bots.filter((bot) => !bot.id.startsWith('preview-')).map((bot) => bot.id)).toEqual(['sbtc', 'sbtc-2']);
+    expect((await call('POST', '/api/bots/sbtc-2/name', { name: 'Tight sBTC' })).status).toBe(200);
+    expect(((await call('GET', '/api/bots/sbtc-2')).body as { name: string }).name).toBe('Tight sBTC');
+  });
+
+  it('exports a strategy without keys and starts a new bot from it', async () => {
+    const { call, root } = boot();
+    const a = createWallet();
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: a.key, name: 'Mine' });
+    await call('POST', '/api/bots/stx/settings', { settings: { CURVE_HALF_WIDTH_BINS: '9', F_STAR: '0.4' } });
+    const strategy = (await call('GET', '/api/bots/stx/strategy')).body as { kind: string; pair: string; settings: Record<string, string> };
+    expect(strategy.kind).toBe('bitflow-mm-strategy');
+    expect(strategy.pair).toBe('stx');
+    expect(strategy.settings.CURVE_HALF_WIDTH_BINS).toBe('9');
+    expect(JSON.stringify(strategy)).not.toContain(a.key);
+    expect(JSON.stringify(strategy)).not.toContain('EXECUTION_MODE');
+
+    const copy = (await call('POST', '/api/bots', { profile: 'stx', wallet: 'create', settings: strategy.settings, name: 'Mine copy' })).body as { bot: { id: string } };
+    const env = readFileSync(join(root, `.env.${copy.bot.id}`), 'utf8');
+    expect(env).toMatch(/^CURVE_HALF_WIDTH_BINS=9$/m);
+    expect(env).toMatch(/^EXECUTION_MODE=dry_run$/m);
+    expect((await call('POST', '/api/bots', { profile: 'stx', wallet: 'create', settings: { EXECUTION_MODE: 'live' } })).status).toBe(400);
+    expect((await call('POST', '/api/bots', { profile: 'stx', wallet: 'create', settings: { F_STAR: '2' } })).status).toBe(400);
+  });
+
+  it('does not start a stopped bot when its settings are saved', async () => {
+    const { call, host } = boot();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: createWallet().key });
+    await call('POST', '/api/bots/sbtc/stop');
+    const spawned = host.seq;
+    const saved = await call('POST', '/api/bots/sbtc/settings', { settings: { CURVE_HALF_WIDTH_BINS: '7' } });
+    expect(saved.status).toBe(200);
+    expect((saved.body as { running: boolean }).running).toBe(false);
+    expect(host.seq).toBe(spawned);
+  });
+
+  it('ignores a pid file that names some other process', async () => {
+    const { call, host, root } = boot();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: createWallet().key });
+    // The page restarts and finds the old pid file, whose number now belongs to something else.
+    (host as unknown as { isBot: (pid: number, profile: string) => boolean }).isBot = () => false;
+    const store = new ConsoleStore(root, host, fakeBridge().client, Date.now());
+    const view = await store.one('sbtc', Date.now());
+    expect(view.running).toBe(false);
+    const alive = host.aliveIds.size;
+    await store.stop('sbtc');
+    expect(host.aliveIds.size).toBe(alive);
+  });
+
+  it('keeps env files private to this user', async () => {
+    const { call, root, host } = boot();
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: wallet.key });
+    expect(statSync(join(root, '.env.sbtc')).mode & 0o777).toBe(0o600);
+
+    writeFileSync(join(root, '.env.stx'), `SIGNER_KEY=${wallet.key}\n`, { mode: 0o644 });
+    new ConsoleStore(root, host, fakeBridge().client, Date.now());
+    expect(statSync(join(root, '.env.stx')).mode & 0o777).toBe(0o600);
+  });
+
+  it('shows the app phrase only to the page, and records the backup once the user proves they have it', async () => {
+    const { call } = boot();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'create' });
+    const before = (await call('GET', '/api/bots/sbtc')).body as { keyBackedUp: boolean; checklist: Array<{ id: string; ok: boolean }> };
+    expect(before.keyBackedUp).toBe(false);
+    expect(before.checklist.find((item) => item.id === 'backup')?.ok).toBe(false);
+
+    const agent = await call('POST', '/api/bots/sbtc/key-backup', { acknowledged: true });
+    expect(agent.status).toBe(403);
+    const unconfirmed = await call('POST', '/api/bots/sbtc/key-backup', {}, PAGE);
+    expect(unconfirmed.status).toBe(409);
+    const shown = await call('POST', '/api/bots/sbtc/key-backup', { acknowledged: true }, PAGE);
+    expect(shown.status).toBe(200);
+    const backup = shown.body as { kind: string; phrase: string; account: number };
+    expect(backup.kind).toBe('phrase');
+    expect(backup.phrase.split(' ')).toHaveLength(24);
+    expect(backup.account).toBe(0);
+    const last = backup.phrase.split(' ').slice(-1)[0];
+
+    expect((await call('POST', '/api/bots/sbtc/key-saved', { keyTail: 'zzzz' }, PAGE)).status).toBe(400);
+    expect((await call('POST', '/api/bots/sbtc/key-saved', { keyTail: last })).status).toBe(403);
+    const saved = await call('POST', '/api/bots/sbtc/key-saved', { keyTail: last }, PAGE);
+    expect(saved.status).toBe(200);
+    expect((saved.body as { keyBackedUp: boolean }).keyBackedUp).toBe(true);
+    const fleet = JSON.stringify((await call('GET', '/api/fleet')).body);
+    expect(fleet).not.toContain(backup.phrase);
+    expect(fleet).not.toContain(backup.phrase.split(' ').slice(0, 3).join(' '));
+
+    // One saved phrase covers the next bot it makes, on the next account.
+    const second = (await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'create' })).body as { bot: { id: string; address: string; walletAccount: number; keyBackedUp: boolean }; backupNeeded: boolean };
+    expect(second.backupNeeded).toBe(false);
+    expect(second.bot.walletAccount).toBe(1);
+    expect(second.bot.keyBackedUp).toBe(true);
+    expect(second.bot.address).toBe(accountOf(backup.phrase, 1).address);
+    expect(second.bot.address).not.toBe(accountOf(backup.phrase, 0).address);
+  });
+
+  it('keeps the app phrase readable only by the user, and never overwrites one it cannot read', async () => {
+    const { call, root } = boot();
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'create' });
+    const file = join(root, '.mm-wallet');
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    const saved = readFileSync(file, 'utf8');
+    writeFileSync(file, 'not json');
+    const res = await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'create' });
+    expect(res.status).toBe(500);
+    expect(readFileSync(file, 'utf8')).toBe('not json');
+    expect(saved).not.toBe('not json');
+  });
+
+  it('never shows a phrase that does not control the bot, and refuses a new app wallet once its file is lost', async () => {
+    const { call, root } = boot();
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'create' });
+    const file = join(root, '.mm-wallet');
+    const original = readFileSync(file, 'utf8');
+    // A different phrase in its place (a bad restore) must not pass as this bot's backup.
+    writeFileSync(file, JSON.stringify({ phrase: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art', backedUpAt: new Date().toISOString() }));
+    const shown = (await call('POST', '/api/bots/stx/key-backup', { acknowledged: true }, PAGE)).body as { kind: string };
+    expect(shown.kind).toBe('key');
+    const mismatched = (await call('GET', '/api/bots/stx')).body as { keyBackedUp: boolean; keySource: string };
+    expect(mismatched.keyBackedUp).toBe(false);
+    expect(mismatched.keySource).toBe('create');
+
+    rmSync(file);
+    expect(((await call('GET', '/api/wallet')).body as { problem: string | null }).problem).toContain('.mm-wallet');
+    const refused = await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'create' });
+    expect(refused.status).toBe(409);
+    expect(existsSync(file)).toBe(false);
+    writeFileSync(file, original);
+    expect((await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'create' })).status).toBe(200);
+  });
+
+  it('stops the simulations once a real bot exists, and lets the user start one again', async () => {
+    const { call } = boot();
+    const sims = async () => ((await call('GET', '/api/fleet')).body as { bots: Array<{ id: string; preview: boolean; running: boolean }> }).bots.filter((bot) => bot.preview);
+    expect((await sims()).every((bot) => bot.running)).toBe(true);
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'create' });
+    expect((await sims()).some((bot) => bot.running)).toBe(false);
+    await call('POST', '/api/bots/preview-sbtc/start', {});
+    expect((await sims()).find((bot) => bot.id === 'preview-sbtc')?.running).toBe(true);
+  });
+
+  it('gives overlapping creates their own ids and accounts', async () => {
+    const { call } = boot();
+    const [a, b] = await Promise.all([
+      call('POST', '/api/bots', { profile: 'stx', wallet: 'create' }),
+      call('POST', '/api/bots', { profile: 'stx', wallet: 'create' }),
+    ]);
+    const botA = (a.body as { bot: { id: string; address: string } }).bot;
+    const botB = (b.body as { bot: { id: string; address: string } }).bot;
+    expect(botA.id).not.toBe(botB.id);
+    expect(botA.address).not.toBe(botB.address);
+  });
+
+  it('imports a phrase account without storing the phrase, and refuses a wallet another bot uses', async () => {
+    const { call, root } = boot();
+    const phrase = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art';
+    expect((await call('POST', '/api/wallet/accounts', { phrase })).status).toBe(403);
+    expect((await call('POST', '/api/wallet/accounts', { phrase: 'not a phrase' }, PAGE)).status).toBe(400);
+
+    const res = await call('POST', '/api/bots', { profile: 'stx', wallet: 'phrase', phrase, account: 2 });
+    expect(res.status).toBe(200);
+    const bot = (res.body as { bot: { address: string; keySource: string; keyBackedUp: boolean; walletAccount: number }; backupNeeded: boolean });
+    expect(bot.bot.address).toBe(accountOf(phrase, 2).address);
+    expect(bot.bot.keySource).toBe('phrase');
+    expect(bot.bot.walletAccount).toBe(2);
+    expect(bot.backupNeeded).toBe(false);
+    expect(readFileSync(join(root, '.env.stx'), 'utf8')).not.toContain('abandon');
+    expect(existsSync(join(root, '.mm-wallet'))).toBe(false);
+
+    const again = await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'phrase', phrase, account: 2 });
+    expect(again.status).toBe(409);
+    expect((again.body as { error: string }).error).toBe('wallet_in_use');
+
+    const listed = (await call('POST', '/api/wallet/accounts', { phrase }, PAGE)).body as { accounts: Array<{ account: number; bot: string | null }> };
+    expect(listed.accounts.map((item) => item.account)).toEqual([0, 1, 2, 3, 4]);
+    expect(listed.accounts[2].bot).toBe('stx');
+  });
+
+  it('keeps app-created and imported phrase wallets apart', async () => {
+    const { call, root } = boot();
+    const made = (await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'create' })).body as { bot: { address: string; keySource: string; walletAccount: number } };
+    const appPhrase = (JSON.parse(readFileSync(join(root, '.mm-wallet'), 'utf8')) as { phrase: string }).phrase;
+    expect(made.bot).toMatchObject({ keySource: 'app-phrase', walletAccount: 0, address: accountOf(appPhrase, 0).address });
+
+    // The user's own phrase: its key is stored, the phrase is not, and the app phrase is untouched.
+    const theirs = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art';
+    const imported = (await call('POST', '/api/bots', { profile: 'stx', wallet: 'phrase', phrase: theirs, account: 0 })).body as { bot: { address: string; keySource: string } };
+    expect(imported.bot).toMatchObject({ keySource: 'phrase', address: accountOf(theirs, 0).address });
+    expect((JSON.parse(readFileSync(join(root, '.mm-wallet'), 'utf8')) as { phrase: string }).phrase).toBe(appPhrase);
+
+    // The app phrase pasted back in as an import takes account 1, so the next app bot skips to 2.
+    const reused = (await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'phrase', phrase: appPhrase, account: 1 })).body as { bot: { address: string } };
+    expect(reused.bot.address).toBe(accountOf(appPhrase, 1).address);
+    const next = (await call('POST', '/api/bots', { profile: 'stx', wallet: 'create' })).body as { bot: { address: string; walletAccount: number } };
+    expect(next.bot).toMatchObject({ walletAccount: 2, address: accountOf(appPhrase, 2).address });
+    expect(((await call('GET', '/api/wallet')).body as { nextAccount: number }).nextAccount).toBe(3);
+  });
+
+  it('does not ask to back up an imported key', async () => {
+    const { call } = boot();
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: wallet.key });
+    const bot = (await call('GET', '/api/bots/stx')).body as { keyBackedUp: boolean; keySource: string };
+    expect(bot.keySource).toBe('import');
+    expect(bot.keyBackedUp).toBe(true);
+  });
+
+  it('only lets the page set the payout address, and checks it', async () => {
+    const { call } = boot();
+    const bot = createWallet();
+    const mine = createWallet();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: bot.key });
+    const tail = mine.address.slice(-4);
+
+    expect((await call('POST', '/api/bots/sbtc/payout', { address: mine.address, addressTail: tail })).status).toBe(403);
+    const viaSettings = await call('POST', '/api/bots/sbtc/settings', { settings: { PAYOUT_ADDRESS: mine.address } });
+    expect(viaSettings.status).toBe(400);
+
+    const own = await call('POST', '/api/bots/sbtc/payout', { address: bot.address, addressTail: bot.address.slice(-4) }, PAGE);
+    expect((own.body as { message: string }).message).toContain('own wallet');
+    const contract = await call('POST', '/api/bots/sbtc/payout', { address: `${mine.address}.vault`, addressTail: 'ault' }, PAGE);
+    expect(contract.status).toBe(400);
+    const wrongTail = await call('POST', '/api/bots/sbtc/payout', { address: mine.address, addressTail: 'XXXX' }, PAGE);
+    expect((wrongTail.body as { error: string }).error).toBe('payout_tail');
+
+    const saved = await call('POST', '/api/bots/sbtc/payout', { address: mine.address, memo: '12345', addressTail: tail }, PAGE);
+    expect(saved.status).toBe(200);
+    expect((saved.body as { payoutAddress: string; payoutMemo: string }).payoutAddress).toBe(mine.address);
+    expect((saved.body as { payoutMemo: string }).payoutMemo).toBe('12345');
+  });
+
+  it('cashes out in dry run to the saved address, after pausing and stopping the bot', async () => {
+    const { call, host, root, store } = boot();
+    const bot = createWallet();
+    const mine = createWallet();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: bot.key });
+    const confirm = { acknowledged: true, poolName: 'sBTC / USDCx' };
+
+    expect(((await call('POST', '/api/bots/preview-sbtc/cash-out', confirm)).body as { error: string }).error).toBe('preview');
+    expect(((await call('POST', '/api/bots/sbtc/cash-out', confirm)).body as { error: string }).error).toBe('no_payout');
+    await call('POST', '/api/bots/sbtc/payout', { address: mine.address, addressTail: mine.address.slice(-4) }, PAGE);
+    expect(((await call('POST', '/api/bots/sbtc/cash-out', { acknowledged: true, poolName: 'nope' })).body as { error: string }).error).toBe('confirm');
+    expect(host.manual.length).toBe(0);
+
+    let release: () => void = () => undefined;
+    host.manualGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    host.manualOutput = '[10:00:00.000] INFO (1): [token_meta] noise\n[10:00:01.000] INFO (1): [cashout] done to=x stx_left=0\n';
+    const started = await call('POST', '/api/bots/sbtc/cash-out', confirm);
+    expect(started.status).toBe(200);
+    expect((started.body as { status: string; to: string }).to).toBe(mine.address);
+    expect(host.manual[0]).toEqual(['--cash-out', '--to', mine.address]);
+    expect(existsSync(join(root, 'data', 'kill.sbtc'))).toBe(true);
+    const during = (await call('GET', '/api/bots/sbtc')).body as { running: boolean; paused: boolean; cashOut: { status: string } };
+    expect(during.running).toBe(false);
+    expect(during.paused).toBe(true);
+    expect(during.cashOut.status).toBe('running');
+    expect(((await call('POST', '/api/bots/sbtc/start')).body as { error: string }).error).toBe('cashing_out');
+
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const job = (await store.one('sbtc', Date.now())).cashOut;
+    expect(job?.status).toBe('done');
+    expect(job?.lines.map((line) => line.text)).toEqual(['[cashout] done to=x stx_left=0']);
+  });
+
+  it('marks a cash out that did not finish as failed', async () => {
+    const { call, host, store } = boot();
+    const bot = createWallet();
+    const mine = createWallet();
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: bot.key });
+    await call('POST', '/api/bots/stx/payout', { address: mine.address, memo: 'm1', addressTail: mine.address.slice(-4) }, PAGE);
+    host.manualOutput = '[10:00:01.000] ERROR (1): [cashout] failed error="stx cannot cover tx fee"\n';
+    await call('POST', '/api/bots/stx/cash-out', { acknowledged: true, poolName: 'STX / USDCx' });
+    expect(host.manual[0]).toEqual(['--cash-out', '--to', mine.address, '--memo', 'm1']);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((await store.one('stx', Date.now())).cashOut?.status).toBe('failed');
+  });
+
+  it('checks payout addresses and memos, and leaves the fee when sweeping STX', () => {
+    const bot = createWallet().address;
+    const mine = createWallet().address;
+    expect(checkPayoutAddress(mine, bot)).toBe('');
+    expect(checkPayoutAddress(bot, bot)).toContain('own wallet');
+    expect(checkPayoutAddress('', bot)).toContain('Enter');
+    expect(checkPayoutAddress('SPnotreal', bot)).toContain('valid');
+    expect(checkPayoutAddress(mine, bot, false)).toContain('testnet');
+    expect(checkMemo('a'.repeat(34))).toBe('');
+    expect(checkMemo('a'.repeat(35))).toContain('34');
+    expect(checkMemo('é')).toContain('plain');
+    expect(stxSweepAmount(BigInt(1_000_000), BigInt(50_000))).toBe(BigInt(950_000));
+    expect(stxSweepAmount(BigInt(10_000), BigInt(50_000))).toBe(BigInt(0));
+  });
+});

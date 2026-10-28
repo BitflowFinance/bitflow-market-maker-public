@@ -1,12 +1,16 @@
 import { Server } from 'http';
 import { startMetricsServer } from './api';
-import { fetchTokens } from './bitflow';
+import { runCashOut } from './cashout';
+import { clearPidFile, writePidFile } from './pid';
+import { fetchTokens, resolvePoolId } from './bitflow';
 import { CONFIG, hydrateTokenMetadata } from './config';
 import { broadcastLiquidity, prepareAddLiquidity, prepareWithdrawLiquidity } from './liquidity';
 import { logError, logInfo, logWarn } from './logger';
 import { initMetrics, recordTick } from './metrics';
 import { runTick } from './mm';
+import { runSbtcWithdraw } from './sbtcWithdraw';
 import { SwapSide, prepareSwap } from './swap';
+import { runUsdcxWithdraw } from './usdcxWithdraw';
 import {
   assertSignerKeyMatchesAddress,
   preflight,
@@ -158,6 +162,21 @@ const hydrateTokens = async (): Promise<void> => {
   }
 };
 
+// Older env files name the pool by its short alias; v2 needs the contract id.
+// A failed lookup keeps the alias so the tick reports the error rather than the
+// process dying before it can be seen.
+const resolvePool = async (): Promise<void> => {
+  const configured = CONFIG.POOL_ID;
+  try {
+    CONFIG.POOL_ID = await resolvePoolId(configured);
+    if (CONFIG.POOL_ID !== configured) {
+      logWarn(`[index] pool_id alias="${configured}" resolved to "${CONFIG.POOL_ID}"; set POOL_ID to the contract id in your env file`);
+    }
+  } catch (err) {
+    logError(`[index] pool_id resolve failed pool="${configured}" error="${(err as Error).message}"`);
+  }
+};
+
 const safeTick = async (): Promise<void> => {
   if (running) {
     logInfo('[index] previous tick still running, skipping');
@@ -189,6 +208,7 @@ const main = async (): Promise<void> => {
 
   // Resolve token asset names + decimals from the BFF before any action.
   await hydrateTokens();
+  await resolvePool();
 
   if (process.argv.includes('--add-liquidity')) {
     await runManualLiquidity('add');
@@ -200,6 +220,21 @@ const main = async (): Promise<void> => {
   }
   if (process.argv.includes('--swap')) {
     await runManualSwap();
+    return;
+  }
+  if (process.argv.includes('--cash-out')) {
+    const ok = await runCashOut(getArg('--to') || '', getArg('--memo') || '');
+    if (!ok) process.exitCode = 1;
+    return;
+  }
+  if (process.argv.includes('--sbtc-withdraw')) {
+    const ok = await runSbtcWithdraw(getArg('--amount') || '', getArg('--to') || '', getArg('--max-fee') || '');
+    if (!ok) process.exitCode = 1;
+    return;
+  }
+  if (process.argv.includes('--usdcx-withdraw')) {
+    const ok = await runUsdcxWithdraw(getArg('--amount') || '', getArg('--to') || '');
+    if (!ok) process.exitCode = 1;
     return;
   }
 
@@ -221,6 +256,7 @@ const main = async (): Promise<void> => {
     logInfo(`[index] received ${signal}, stopping`);
     if (interval) clearInterval(interval);
     if (parentWatch) clearInterval(parentWatch);
+    clearPidFile();
     if (metricsServer) {
       // Drop lingering keep-alive connections so the port frees immediately
       // instead of the close() waiting on them.
@@ -259,7 +295,8 @@ const main = async (): Promise<void> => {
   }, 2000);
   parentWatch.unref();
 
-  logInfo(`[index] scheduling ticks every ${CONFIG.TICK_INTERVAL_MS}ms`);
+  writePidFile();
+  logInfo(`[index] scheduling ticks every ${CONFIG.TICK_INTERVAL_MS}ms pid_file="${CONFIG.PID_FILE}"`);
   await safeTick();
   interval = setInterval(() => {
     void safeTick();

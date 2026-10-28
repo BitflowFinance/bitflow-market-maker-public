@@ -37,10 +37,19 @@ export interface TickSnapshot {
   pnlVsHodl: number | null;
   // Gas is always native STX (6-decimals), independent of the pool's tokens.
   feesPaidStx: number;
+  /** STX in the wallet for fees. Null when it was not read. */
+  walletStx: number | null;
   executed: boolean;
   planType: string | null;
   planSteps: number;
   durationSeconds: number;
+  /** Bins owned at this read. Carried forward when the tick did not read the pool. */
+  ownedBinIds: number[];
+  txIds: string[];
+  /** True when wallet and LP figures are copied from an earlier tick. */
+  holdingsCarried: boolean;
+  /** When the copied figures were actually read. Equal to `t` on a fresh read. */
+  holdingsAsOf: string | null;
   // Strategy-emitted numeric signals (curve: f, bidFraction, width, size, sigma,
   // dBps, refPrice, refAgeMs). Absent for strategies that don't emit them.
   signals?: Record<string, number>;
@@ -66,6 +75,53 @@ let lastTick: TickSnapshot | null = null;
 const history: TickSnapshot[] = [];
 let baseline: Baseline | null = null;
 let jsonlDisabled = false;
+
+interface HeldPosition {
+  walletQuote: number;
+  walletBase: number;
+  ownedQuote: number;
+  ownedBase: number;
+  portfolioValue: number | null;
+  pnlVsHodl: number | null;
+  peg: number | null;
+  activeBinId: number;
+  activeBinPrice: number;
+  ownedBinIds: number[];
+  walletStx: number | null;
+  asOf: string;
+}
+let lastHoldings: HeldPosition | null = null;
+
+/** Touch this file (next to the baseline) to zero PnL on the next tick without restarting. */
+export const baselineResetRequestFile = (): string =>
+  CONFIG.METRICS_BASELINE_FILE ? `${CONFIG.METRICS_BASELINE_FILE}.reset` : '';
+
+export const resetBaseline = (): void => {
+  baseline = null;
+  const file = CONFIG.METRICS_BASELINE_FILE;
+  if (file && existsSync(file)) {
+    try {
+      rmSync(file);
+    } catch (err) {
+      logWarn(`[metrics] baseline_reset_failed error="${(err as Error).message}"`);
+    }
+  }
+  const request = baselineResetRequestFile();
+  if (request && existsSync(request)) {
+    try {
+      rmSync(request);
+    } catch (err) {
+      logWarn(`[metrics] baseline_reset_request_clear_failed error="${(err as Error).message}"`);
+    }
+  }
+  logWarn('[metrics] baseline reset -- PnL re-baselines on the next valued tick');
+};
+
+const consumeBaselineResetRequest = (): void => {
+  const request = baselineResetRequestFile();
+  if (!request || !existsSync(request)) return;
+  resetBaseline();
+};
 
 // Collapse the freeform hold/freeze reason into a low-cardinality tag so holds
 // can be counted by cause without exploding the counter map.
@@ -170,6 +226,7 @@ const portfolioValue = (s: {
 
 export const recordTick = (result: TickResult): void => {
   if (!CONFIG.METRICS_ENABLED) return;
+  consumeBaselineResetRequest();
 
   const walletQuote = toWhole(result.walletQuote, CONFIG.QUOTE_DECIMALS);
   const walletBase = toWhole(result.walletBase, CONFIG.BASE_DECIMALS);
@@ -207,32 +264,57 @@ export const recordTick = (result: TickResult): void => {
       : null;
 
   const reasonTag = classifyReason(result.decision, result.reason);
+  const readAt = new Date().toISOString();
+  const carried = !hasHoldings && lastHoldings != null;
+  const held = carried ? lastHoldings : null;
   const snapshot: TickSnapshot = {
-    t: new Date().toISOString(),
+    t: readAt,
     tickId: result.tickId,
     pool: result.poolId,
     decision: result.decision,
     reason: result.reason,
     reasonTag,
-    activeBinId: result.activeBinId,
+    activeBinId: result.activeBinId < 0 && held ? held.activeBinId : result.activeBinId,
     targetBinId: result.targetBinId,
     binOffset: result.binOffset,
-    peg,
-    activeBinPrice: result.activeBinPrice,
+    peg: held ? held.peg : peg,
+    activeBinPrice: result.activeBinId < 0 && held ? held.activeBinPrice : result.activeBinPrice,
     imbalanceBps: result.imbalanceBps,
-    walletQuote,
-    walletBase,
-    ownedQuote,
-    ownedBase,
-    portfolioValue: value,
-    pnlVsHodl,
+    walletQuote: held ? held.walletQuote : walletQuote,
+    walletBase: held ? held.walletBase : walletBase,
+    ownedQuote: held ? held.ownedQuote : ownedQuote,
+    ownedBase: held ? held.ownedBase : ownedBase,
+    portfolioValue: held ? held.portfolioValue : value,
+    pnlVsHodl: held ? held.pnlVsHodl : pnlVsHodl,
     feesPaidStx: microToNum(result.feesPaidUstx),
+    walletStx: held ? held.walletStx : result.walletStx === undefined ? null : microToNum(result.walletStx),
     executed: result.executed,
     planType: result.plan ? result.plan.type : null,
     planSteps: result.plan ? result.plan.steps.length : 0,
     durationSeconds: result.durationSeconds,
     signals: result.signals,
+    ownedBinIds: result.ownedBinIds ?? (held ? held.ownedBinIds : []),
+    txIds: result.txIds ?? [],
+    holdingsCarried: carried,
+    holdingsAsOf: held ? held.asOf : hasHoldings ? readAt : null,
   };
+
+  if (hasHoldings) {
+    lastHoldings = {
+      walletQuote,
+      walletBase,
+      ownedQuote,
+      ownedBase,
+      portfolioValue: value,
+      pnlVsHodl,
+      peg,
+      activeBinId: result.activeBinId,
+      activeBinPrice: result.activeBinPrice,
+      ownedBinIds: result.ownedBinIds ?? [],
+      walletStx: result.walletStx === undefined ? null : microToNum(result.walletStx),
+      asOf: readAt,
+    };
+  }
 
   ticksRecorded += 1;
   inc(byDecision, result.decision);

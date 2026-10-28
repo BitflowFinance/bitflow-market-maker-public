@@ -159,6 +159,7 @@ export interface AppConfig {
   METRICS_LOG_FILE: string;
   METRICS_BASELINE_FILE: string;
   METRICS_RESET_BASELINE: boolean;
+  PID_FILE: string;
 
   LOG_LEVEL: string;
 }
@@ -297,6 +298,8 @@ export const CONFIG: AppConfig = {
     process.env.METRICS_BASELINE_FILE ||
     (POOL_PROFILE ? `data/metrics-baseline.${POOL_PROFILE}.json` : 'data/metrics-baseline.json'),
   METRICS_RESET_BASELINE: process.env.METRICS_RESET_BASELINE === 'true',
+  PID_FILE:
+    process.env.PID_FILE || (POOL_PROFILE ? `data/bot.${POOL_PROFILE}.pid` : 'data/bot.pid'),
 
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
 };

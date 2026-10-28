@@ -5,7 +5,7 @@ import { checkEngineTip, getPoolSnapshot, PoolSnapshot, TipCheck } from './bitfl
 import { RebalancePlan, executePlan, logPlan } from './plan';
 import { withdrawLiquidity } from './primitives';
 import { microToString } from './stacks';
-import { preflight } from './wallet';
+import { getAccountBalances, preflight } from './wallet';
 import { Decision, computeImbalanceBps, driftBps } from './strategy/strategy';
 import { resolvePlugins } from './registry';
 
@@ -39,7 +39,13 @@ export interface TickResult {
   ownedQuote?: bigint;
   ownedBase?: bigint;
   feesPaidUstx?: bigint;
+  /** Native STX in the wallet (the fee tank). Omitted when it could not be read. */
+  walletStx?: bigint;
   signals?: Record<string, number>;
+  /** Bins this wallet owns. Omitted when the tick never read the pool. */
+  ownedBinIds?: number[];
+  /** Broadcast tx ids for this tick. Empty in dry run. */
+  txIds?: string[];
 }
 
 export interface RuntimeState {
@@ -136,6 +142,10 @@ export const isBreakerTripped = (count: number, max: number): boolean =>
 export const wouldParkOffActive = (binOffset: number | null, hasSwap: boolean): boolean =>
   binOffset !== null && binOffset !== 0 && !hasSwap;
 
+/** What a strategy halt actually does. Withdraw runs only when the flag is on and mode is live. */
+export const strategyHaltAction = (withdrawAll: boolean, live: boolean): string =>
+  withdrawAll && live ? 'withdraw all + frozen' : 'frozen, liquidity left in place';
+
 export const killSwitchActive = (): boolean => {
   if (CONFIG.KILL_SWITCH) return true;
   if (CONFIG.KILL_SWITCH_FILE && existsSync(CONFIG.KILL_SWITCH_FILE)) return true;
@@ -173,19 +183,19 @@ const emergencyWithdrawAll = async (poolId: string): Promise<void> => {
 const executeGuardedPlan = async (
   plan: RebalancePlan,
   gasStx: bigint,
-): Promise<{ decision: Decision; reason?: string; executed: boolean; feesPaidUstx: bigint }> => {
+): Promise<{ decision: Decision; reason?: string; executed: boolean; feesPaidUstx: bigint; txIds: string[] }> => {
   if (CONFIG.EXECUTION_MODE === 'live') {
     const minGas = BigInt(CONFIG.MIN_TX_FEE_USTX);
     if (gasStx >= BigInt(0) && gasStx < minGas) {
       const reason = `wallet_stx=${microToString(gasStx)} below min tx fee=${microToString(minGas)}; top up STX before rebalancing`;
       logWarn(`[${TAG}] GUARDRAIL low_gas ${reason} -> hold`);
-      return { decision: 'hold', reason, executed: false, feesPaidUstx: BigInt(0) };
+      return { decision: 'hold', reason, executed: false, feesPaidUstx: BigInt(0), txIds: [] };
     }
   }
   logPlan(plan);
   if (CONFIG.EXECUTION_MODE !== 'live') {
     logInfo(`[${TAG}] dry_run: plan logged, no transactions sent`);
-    return { decision: 'rebalance', executed: false, feesPaidUstx: BigInt(0) };
+    return { decision: 'rebalance', executed: false, feesPaidUstx: BigInt(0), txIds: [] };
   }
   try {
     const pf = await preflight();
@@ -193,26 +203,27 @@ const executeGuardedPlan = async (
     if (pf.missingNonces.length > 0) {
       const reason = `nonce gap detected (missing [${pf.missingNonces.join(',')}]); holding until cleared`;
       logWarn(`[${TAG}] GUARDRAIL nonce_gap ${reason} -> hold`);
-      return { decision: 'hold', reason, executed: false, feesPaidUstx: BigInt(0) };
+      return { decision: 'hold', reason, executed: false, feesPaidUstx: BigInt(0), txIds: [] };
     }
     if (pf.mempoolPending) {
       const reason = `a prior tx is still pending in the mempool; holding to avoid piling up nonces`;
       logWarn(`[${TAG}] GUARDRAIL pending_tx ${reason} -> hold`);
-      return { decision: 'hold', reason, executed: false, feesPaidUstx: BigInt(0) };
+      return { decision: 'hold', reason, executed: false, feesPaidUstx: BigInt(0), txIds: [] };
     }
     if (pf.stxBalance < estTotalFees) {
       const reason = `wallet_stx=${microToString(pf.stxBalance)} cannot cover ${plan.steps.length}-step fees (~${microToString(estTotalFees)}); top up STX`;
       logWarn(`[${TAG}] GUARDRAIL low_gas_multistep ${reason} -> hold`);
-      return { decision: 'hold', reason, executed: false, feesPaidUstx: BigInt(0) };
+      return { decision: 'hold', reason, executed: false, feesPaidUstx: BigInt(0), txIds: [] };
     }
     const results = await executePlan(plan, pf);
     const executed = results.length > 0 && results.every((r) => r.ok);
     const feesPaidUstx = results.reduce((sum, r) => sum + (r.feeUstx ?? BigInt(0)), BigInt(0));
+    const txIds = results.map((r) => r.txId).filter((id) => id.length > 0 && !id.startsWith('stub-'));
     logInfo(`[${TAG}] plan_executed steps=${results.length} ok=${executed}`);
-    return { decision: 'rebalance', executed, feesPaidUstx };
+    return { decision: 'rebalance', executed, feesPaidUstx, txIds };
   } catch (err) {
     logWarn(`[${TAG}] GUARDRAIL preflight_failed error="${(err as Error).message}" -> no execution`);
-    return { decision: 'hold', reason: 'preflight_failed', executed: false, feesPaidUstx: BigInt(0) };
+    return { decision: 'hold', reason: 'preflight_failed', executed: false, feesPaidUstx: BigInt(0), txIds: [] };
   }
 };
 
@@ -287,6 +298,17 @@ export const runTick = async (): Promise<TickResult> => {
 
   const { quote, base, walletQuote, walletBase, ownedQuote, ownedBase, gasStx } =
     resolveSides(snapshot);
+  // Reported so the page can show the fee tank before it runs dry. A pool with an
+  // STX side already read it; otherwise it costs one balance read, and a failed
+  // read only leaves it unknown -- it never affects the decision.
+  const walletStx =
+    gasStx >= BigInt(0)
+      ? gasStx
+      : CONFIG.SIGNER_ADDRESS
+        ? await getAccountBalances(CONFIG.SIGNER_ADDRESS)
+            .then((b) => b.stx)
+            .catch(() => undefined)
+        : undefined;
 
   if (
     CONFIG.BASE_TOKEN_CONTRACT &&
@@ -340,10 +362,12 @@ export const runTick = async (): Promise<TickResult> => {
       reason: holdReason,
       executed: false,
       durationSeconds,
+      ownedBinIds: snapshot.ownedBinIds,
       walletQuote,
       walletBase,
       ownedQuote,
       ownedBase,
+      walletStx,
     };
   }
 
@@ -355,6 +379,7 @@ export const runTick = async (): Promise<TickResult> => {
     const result = emptyResult(tickId, startMs, 'frozen', `peg_unavailable: ${feedRes.error}`);
     result.activeBinId = snapshot.activeBinId;
     result.activeBinPrice = snapshot.activeBinPrice;
+    result.ownedBinIds = snapshot.ownedBinIds;
     result.activeBinQuote = quote;
     result.activeBinBase = base;
     logInfo(`[${TAG}] tick_end id=${tickId} decision="frozen" duration="${result.durationSeconds}s"`);
@@ -394,12 +419,13 @@ export const runTick = async (): Promise<TickResult> => {
   const plan: RebalancePlan | undefined = dec.plan;
   let executed = false;
   let feesPaidUstx = BigInt(0);
+  let txIds: string[] = [];
 
   if (dec.halt) {
     decision = 'frozen';
     reason = `${dec.halt.kind}: ${dec.halt.reason}`;
     logWarn(
-      `[${TAG}] GUARDRAIL strategy_halt kind=${dec.halt.kind} reason="${dec.halt.reason}" -> withdraw all + frozen`,
+      `[${TAG}] GUARDRAIL strategy_halt kind=${dec.halt.kind} reason="${dec.halt.reason}" -> ${strategyHaltAction(CONFIG.BREAKER_WITHDRAW_ALL, CONFIG.EXECUTION_MODE === 'live')}`,
     );
     await emergencyWithdrawAll(snapshot.poolId);
   } else if (dec.plan) {
@@ -408,6 +434,7 @@ export const runTick = async (): Promise<TickResult> => {
     if (guarded.reason) reason = guarded.reason;
     executed = guarded.executed;
     feesPaidUstx = guarded.feesPaidUstx;
+    txIds = guarded.txIds;
   }
 
   const durationSeconds = Number(((Date.now() - startMs) / 1000).toFixed(2));
@@ -435,6 +462,9 @@ export const runTick = async (): Promise<TickResult> => {
     ownedQuote,
     ownedBase,
     feesPaidUstx,
+    walletStx,
     signals: dec.signals,
+    ownedBinIds: snapshot.ownedBinIds,
+    txIds,
   };
 };

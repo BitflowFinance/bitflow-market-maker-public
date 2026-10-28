@@ -6,6 +6,7 @@ import {
   fetchQuotesPool,
   fetchUserBins,
   getPoolSnapshot,
+  resolvePoolId,
   userBinLiquidity,
 } from '../src/bitflow';
 import { poolFeesFrom } from '../src/liquidity';
@@ -38,7 +39,10 @@ const route = (overrides: Record<string, unknown> = {}) =>
     if (url.includes('/quotes/v2/bins/')) return ok(fixtures.v2.bins);
     if (url.includes('/current-bins')) return ok(fixtures.v2.currentBins);
     if (url.includes('/positions/')) return ok(fixtures.v1.positions);
-    // Anything else (app pool, FT balances) is tolerated by the caller.
+    // Token balances are read-only contract calls; answer (ok u0) so a balance
+    // read succeeds, since a failed one now fails the snapshot.
+    if (url.includes('/call-read/')) return ok({ okay: true, result: `0x0701${'00'.repeat(16)}` });
+    // Anything else (app pool) is tolerated by the caller.
     return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) };
   });
 
@@ -291,13 +295,75 @@ describe('a wallet with no position yet', () => {
     await expect(fetchUserBins(POOL, SIGNER)).resolves.toEqual([]);
   });
 
-  it('names the alias/principal mix-up that v2 reports as POOL_NOT_FOUND', async () => {
+  it('names a pool v2 reports as POOL_NOT_FOUND', async () => {
     vi.stubGlobal(
       'fetch',
       route({ '/current-bins': { error: 'pool is not in the MM inventory cohort', errorCode: 'POOL_NOT_FOUND' } }),
     );
     CONFIG.BFF_API_VERSION = 'v2';
 
-    await expect(fetchUserBins(POOL, SIGNER)).rejects.toThrow(/must be the BFF alias/);
+    await expect(fetchUserBins(POOL, SIGNER)).rejects.toThrow(/POOL_ID is the pool contract id/);
+  });
+
+  const notRegistered = {
+    ok: false,
+    status: 503,
+    statusText: 'Service Unavailable',
+    json: async () => ({ errorCode: 'NODE_POSITION_NOT_REGISTERED' }),
+  };
+
+  const nonces = { possible_next_nonce: 1, last_executed_tx_nonce: 0, last_mempool_tx_nonce: null };
+  const history = (functions: string[], sender = SIGNER) => ({
+    total: functions.length + 1,
+    results: [
+      ...functions.map((fn) => ({ sender_address: sender, tx_type: 'contract_call', contract_call: { function_name: fn } })),
+      // The funding transfer arrives from someone else and never counts.
+      { sender_address: 'SP000000000000000000002Q6VF78', tx_type: 'token_transfer' },
+    ],
+  });
+
+  it('reads "position not registered" as empty for a wallet that has only swapped or been funded', async () => {
+    CONFIG.BFF_API_VERSION = 'v2';
+    vi.stubGlobal(
+      'fetch',
+      route({ '/current-bins': notRegistered, '/nonces': nonces, '/transactions': history(['swap-x-for-y-simple-range-multi']) }),
+    );
+    await expect(fetchUserBins(POOL, SIGNER)).resolves.toEqual([]);
+  });
+
+  it('keeps "position not registered" an error once the wallet has added or moved liquidity, or has a pending tx', async () => {
+    CONFIG.BFF_API_VERSION = 'v2';
+    // The engine may simply not have indexed that position yet; reading it as
+    // empty would invite a redeploy on top of liquidity the wallet owns.
+    for (const fn of ['add-relative-liquidity-same-multi', 'add-liquidity-multi', 'move-relative-liquidity-multi']) {
+      vi.stubGlobal('fetch', route({ '/current-bins': notRegistered, '/nonces': nonces, '/transactions': history([fn]) }));
+      await expect(fetchUserBins(POOL, SIGNER)).rejects.toThrow(/NODE_POSITION_NOT_REGISTERED/);
+    }
+    vi.stubGlobal(
+      'fetch',
+      route({ '/current-bins': notRegistered, '/nonces': { ...nonces, last_mempool_tx_nonce: 1 }, '/transactions': history([]) }),
+    );
+    await expect(fetchUserBins(POOL, SIGNER)).rejects.toThrow(/NODE_POSITION_NOT_REGISTERED/);
+  });
+});
+
+describe('unknown pool', () => {
+  it('fails on success: false instead of reading an empty pool', async () => {
+    CONFIG.BFF_API_VERSION = 'v2';
+    vi.stubGlobal('fetch', route({ '/quotes/v2/bins/': { success: false, pool_id: POOL, bins: [], active_bin_id: null, error: 'Pool not found' } }));
+    await expect(fetchPoolBins(POOL)).rejects.toThrow(/Pool not found/);
+  });
+});
+
+describe('pool id form', () => {
+  it('resolves a legacy alias to the contract id on v2 and leaves contract ids alone', async () => {
+    CONFIG.BFF_API_VERSION = 'v2';
+    const contract = 'SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-pool-sbtc-usdcx-v-1-bps-10';
+    const fetchMock = route({ '/app/v2/pools/dlmm_1': { poolId: contract, poolContract: contract } });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(resolvePoolId('dlmm_1')).resolves.toBe(contract);
+    const calls = fetchMock.mock.calls.length;
+    await expect(resolvePoolId(contract)).resolves.toBe(contract);
+    expect(fetchMock.mock.calls.length).toBe(calls);
   });
 });

@@ -4,6 +4,7 @@ import {
   driftBps,
   isBreakerTripped,
   nextBreakerCount,
+  strategyHaltAction,
   wouldParkOffActive,
 } from '../src/mm';
 
@@ -86,5 +87,16 @@ describe('wouldParkOffActive', () => {
 
   it('is false when there is no target bin', () => {
     expect(wouldParkOffActive(null, false)).toBe(false);
+  });
+});
+
+describe('strategyHaltAction', () => {
+  it('withdraws only when the flag is on and the bot is live', () => {
+    expect(strategyHaltAction(true, true)).toBe('withdraw all + frozen');
+  });
+
+  it('leaves liquidity in place otherwise', () => {
+    expect(strategyHaltAction(false, true)).toBe('frozen, liquidity left in place');
+    expect(strategyHaltAction(true, false)).toBe('frozen, liquidity left in place');
   });
 });

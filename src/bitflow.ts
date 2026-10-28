@@ -1,6 +1,7 @@
 import { CONFIG } from './config';
 import { fetchJson, fetchJsonAllowMissing, getFtBalance } from './stacks';
 import { logDebug, logWarn } from './logger';
+import { getNonceInfo } from './wallet';
 
 export const BIN_CENTER = 500;
 export const PRICE_SCALE = 1e8;
@@ -214,6 +215,16 @@ export const checkEngineTip = async (): Promise<TipCheck> => {
   return { fresh: true, reason: `tip_lag=${s.tip_lag}` };
 };
 
+// v2 routes key off the pool contract id. The short aliases (dlmm_1) that older
+// env files carry now 404 on the quote routes, so resolve one once at startup.
+export const resolvePoolId = async (poolId: string): Promise<string> => {
+  if (!poolId || poolId.includes('.') || apiVersion() !== 'v2') return poolId;
+  const pool = await fetchJson<{ poolContract?: string; poolId?: string }>(`${base()}/app/v2/pools/${poolId}`, CONFIG.BFF_API_KEY);
+  const contract = pool.poolContract || pool.poolId || '';
+  if (!contract.includes('.')) throw new Error(`could not resolve pool "${poolId}" to a contract id`);
+  return contract;
+};
+
 export const fetchPoolBins = async (poolId: string): Promise<PoolBinsResponse> => {
   const v = apiVersion();
   const res = await fetchJson<PoolBinsResponse>(
@@ -221,6 +232,11 @@ export const fetchPoolBins = async (poolId: string): Promise<PoolBinsResponse> =
     CONFIG.BFF_API_KEY,
   );
   if (v === 'v1') return res;
+  // An unknown pool is HTTP 200 with success: false and no bins. Read as data it
+  // would look like an empty pool, so it has to fail like any other bad read.
+  if (res.success === false) {
+    throw new Error(`pool bins unavailable pool="${poolId}" error="${(res as { error?: string }).error || 'unknown'}"`);
+  }
   return {
     ...res,
     bins: (res.bins || []).map((b) => ({ ...b, bin_id: unsignedBinId(Number(b.bin_id)) })),
@@ -250,17 +266,61 @@ interface CurrentBinsResponse {
   errorCode?: string;
 }
 
+// Liquidity reaches a wallet only through an add or a move it sends itself, so a
+// wallet that never sent one cannot hold a position, and "no position registered"
+// is safe to read as an empty book for it. Swaps and transfers (a de-risk sell, a
+// funding round trip) don't count. A pending transaction, an unreadable history,
+// or one too long to scan all mean the position is unknown.
+const HISTORY_SCAN_MAX = 200;
+const createsPosition = (fn: string): boolean => /liquidity/.test(fn) && /(add|move)/.test(fn);
+
+export const walletNeverAddedLiquidity = async (address: string): Promise<boolean> => {
+  try {
+    if ((await getNonceInfo(address)).mempoolPending) return false;
+    const api = (CONFIG.STACKS_NODE_URL || 'https://api.hiro.so').replace(/\/$/, '');
+    for (let offset = 0; offset < HISTORY_SCAN_MAX; offset += 50) {
+      const page = await fetchJson<{
+        total?: number;
+        results?: Array<{ sender_address?: string; tx_type?: string; contract_call?: { function_name?: string } }>;
+      }>(`${api}/extended/v1/address/${address}/transactions?limit=50&offset=${offset}`, CONFIG.STACKS_NODE_KEY);
+      const results = page.results || [];
+      const added = results.some(
+        (tx) => tx.sender_address === address && tx.tx_type === 'contract_call' && createsPosition(tx.contract_call?.function_name || ''),
+      );
+      if (added) return false;
+      const total = page.total ?? 0;
+      if (offset + results.length >= total) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+};
+
+const readCurrentBins = async (url: string, address: string): Promise<CurrentBinsResponse | null> => {
+  try {
+    return await fetchJson<CurrentBinsResponse>(url, CONFIG.BFF_API_KEY);
+  } catch (err) {
+    if (!(err as Error).message.startsWith('503')) throw err;
+    // v2 answers 503 NODE_POSITION_NOT_REGISTERED, not an empty list, for a
+    // wallet the engine has never seen in this pool. fetchJson drops the body,
+    // so read the code once more before deciding.
+    const res = await fetch(url, { headers: CONFIG.BFF_API_KEY ? { 'X-API-Key': CONFIG.BFF_API_KEY } : {} });
+    const body = (await res.json().catch(() => ({}))) as CurrentBinsResponse;
+    if (body.errorCode === 'NODE_POSITION_NOT_REGISTERED' && (await walletNeverAddedLiquidity(address))) return null;
+    throw new Error(`${(err as Error).message} code="${body.errorCode || ''}"`);
+  }
+};
+
 const fetchUserBinsV2 = async (poolId: string, address: string): Promise<UserBin[]> => {
   const url = `${base()}/app/v2/users/${address}/positions/${poolId}/current-bins`;
-  const res = await fetchJson<CurrentBinsResponse>(url, CONFIG.BFF_API_KEY);
-  // This endpoint keys off the pool alias and 404s on a contract principal --
-  // the reverse of the other app/v2 routes -- so say so rather than reporting it
-  // as a dirty snapshot.
+  const res = await readCurrentBins(url, address);
+  if (!res) {
+    logDebug('[bitflow] no user bins: this wallet has never added liquidity');
+    return [];
+  }
   if (res.errorCode === 'POOL_NOT_FOUND') {
-    throw new Error(
-      `pool "${poolId}" not found in the v2 MM inventory cohort; POOL_ID must be the ` +
-        'BFF alias (e.g. dlmm_1), not the pool contract principal',
-    );
+    throw new Error(`pool "${poolId}" not found in the v2 MM inventory; check POOL_ID is the pool contract id`);
   }
   // An empty book is only ever reported as clean+complete with bins: []. A dirty
   // or tip-lagging snapshot must never be read as "no inventory" -- that would
@@ -323,9 +383,8 @@ export const getPoolSnapshot = async (
   poolId: string,
   address: string,
 ): Promise<PoolSnapshot> => {
-  // app/v2 rejects the short aliases (dlmm_1) and only answers to the contract
-  // principal, and it carries nothing the quotes pool doesn't already give us
-  // here, so v2 skips the call entirely rather than resolving the alias twice.
+  // On v2 the app pool carries nothing the quotes pool doesn't already give us
+  // here, so it is skipped.
   const [quotesPool, appPool, binsRes] = await Promise.all([
     fetchQuotesPool(poolId),
     apiVersion() === 'v2'
@@ -349,10 +408,13 @@ export const getPoolSnapshot = async (
   // breaker see it instead.
   const userBins = address ? await fetchUserBins(poolId, address) : [];
 
-  const [walletX, walletY] = await Promise.all([
-    getFtBalance(tokenX.contract, address).catch(() => BigInt(0)),
-    getFtBalance(tokenY.contract, address).catch(() => BigInt(0)),
-  ]);
+  // A failed read must not become a zero balance: the bot would then see an empty
+  // wallet and hold for "low gas", or size a plan off funds it believes are gone.
+  const readBalance = (contract: string): Promise<bigint> =>
+    getFtBalance(contract, address).catch((err: Error) => {
+      throw new Error(`wallet balance read failed token=${contract}: ${err.message}`);
+    });
+  const [walletX, walletY] = await Promise.all([readBalance(tokenX.contract), readBalance(tokenY.contract)]);
 
   // Owned reserves are our share of each bin: the user-positions endpoint only
   // returns our share count, so join with pool bins for totals + reserves.

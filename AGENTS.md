@@ -9,7 +9,41 @@ npm test           # Run the vitest suite once
 npm run tick -- --pool sbtc   # Single tick (dry-run friendly)
 npm run dev -- --pool sbtc    # Loop with auto-reload
 npm start -- --pool sbtc      # Compiled loop (prefer `node dist/index.js`)
+npm run ui         # Local app at http://127.0.0.1:5191. See "Setting up the app" below.
 ```
+
+## Setting up the app
+
+When a user has just downloaded this repo and asks you to set it up, get the app online and hand them the URL:
+
+1. Check Node: `node -v` must be 20 or newer. If it is older or missing, install Node 22 (for example `nvm install 22 && nvm use 22`).
+2. From the repo root, run `npm install`.
+3. Run `npm run ui` and leave it running in the background. On first run it installs `ui/` dependencies itself.
+4. Wait for `Bitflow Market Maker is running: http://127.0.0.1:5191`, then confirm with `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5191/api/fleet` (expect `200`).
+5. Tell the user to open http://127.0.0.1:5191. There is no login. Preview bots with fake funds are already running, so the page is useful immediately.
+
+Do not create a real bot, go live, or fund a wallet unless the user asks. If port 5191 or 4173 is taken, set `CONSOLE_PAGE_PORT` / `CONSOLE_API_PORT`.
+
+Bots started from the page stop when `npm run ui` stops, and a background shell you started usually ends with your session. Before a user takes a bot live, tell them to run `npm run ui` in their own terminal and keep it open, and that sleep or a restart stops the bot too.
+
+## Local page
+
+There is no login code. The helper only answers requests from this computer: it checks the `Host` and `Origin` headers, refuses cross-site browser requests, and requires `content-type: application/json` on writes. Do not put `SIGNER_KEY` in chat, in a tool argument, or in a page response.
+
+Agent calls go to `http://127.0.0.1:4173` with `content-type: application/json`. The page itself is `http://127.0.0.1:5191` and proxies `/api` to that helper.
+
+- `GET /api/fleet` answers how the bots are doing. Each bot carries `insights` (time in range, trades and gas over 24h and all time), `market` (pool vs market price and the gap against the halt limit), `inventory`, `curve`, and `walletStx` / `gasTxLeft`.
+- `GET /api/pools?profile=sbtc|stx` ranks the pair's pools (`recommended`, and `reasons` for each skipped one). `POST /api/bots/:id/pool` with `poolId`, `acknowledged: true`, and the exact `poolName` changes pools; it runs in the background (`poolSwitch` on the bot), withdraws first when live, and changes nothing unless the old pool is confirmed empty. Only change pools when the user asks.
+- `GET /api/bots/:id/history?range=1d|7d|all` gives chart points; `GET /api/bots/:id/decisions.csv` gives every recorded check.
+- `POST /api/bots/:id/pause`, `/resume`, `/start`, `/stop` control the process. Pause is the kill switch and does not withdraw. Stop does not withdraw. `POST /api/pause-all` (the header's Pause all) pauses every running bot and leaves stopped ones alone.
+- `POST /api/bots/:id/manual` is a swap, add, or withdraw. Dry run returns 409. Withdraw returns 409 until the bot is paused. Body must include `acknowledged: true` and `poolName` equal to `sBTC / USDCx` or `STX / USDCx`.
+- `POST /api/bots/:id/settings` writes the env file and restarts. `SIGNER_KEY` is rejected. Setting `EXECUTION_MODE` to `live` also requires `confirmLive: true` and the exact `poolName`.
+- `POST /api/bots/:id/cash-out` pauses and stops the bot, withdraws everything, and sends all tokens and STX to the saved payout address. It works in dry run. Body must include `acknowledged: true` and the exact `poolName`; it returns 409 `no_payout` until the user saves an address. It runs in the background: poll `GET /api/bots/:id/cash-out` until `status` is `done` or `failed`. A `failed` run is safe to repeat. Only cash out when the user asks in chat.
+- `key-backup`, `key-saved`, and `payout` answer only the page (403 `page_only` otherwise). Do not try to get around that: never read, print, or repeat `SIGNER_KEY`, and never set or suggest a payout address the user did not type themselves. Send the user to the Wallet tab instead.
+- `GET /api/bridge` lists every bot's transfers. `GET /api/bots/:id/bridge` gives the bot's sBTC deposit address, withdrawal limits, and transfers. `POST /api/bots/:id/bridge-deposit` makes the deposit address (nothing leaves the wallet; the console finds and registers deposits itself). `bridge-usdc-deposit` records a USDC deposit the user sent from their Ethereum wallet (the receipt is checked against the bot address before it counts). `bridge-withdraw` (sBTC to a Bitcoin address) and `bridge-usdc-withdraw` (USDCx to an Ethereum address) send funds out, so they answer only the page; send the user to the Bridge page.
+- Preview ids look like `preview-sbtc`.
+
+New bots are created with `POST /api/bots` and always start in dry run. Importing a key writes it to `.env.<pool>` and the JSON response must not contain it.
 
 **Note:** Tests run with vitest (`npm test`). No separate linter; `tsconfig` has
 `strict`, `noUnusedLocals`, and `noUnusedParameters` on, so `npm run build` /
@@ -76,6 +110,13 @@ logInfo('[tag] key="value"');
 - `src/mm.ts`         - One tick: read state, run feed + strategy, guard, execute
 - `src/registry.ts`   - Maps `POOL_STRATEGY` -> CoinGecko feed + curve
 - `src/conversion.ts` - `swap_only` inventory conversion
+- `src/cashout.ts`    - `--cash-out`: withdraw all, send tokens + STX to the payout address
+- `src/payout.ts`     - Payout address / memo checks (no CONFIG, shared with the console)
+- `src/sbtc.ts`       - sBTC peg constants + Bitcoin address encoding (no CONFIG, shared)
+- `src/sbtcWithdraw.ts` - `--sbtc-withdraw`: one sBTC -> BTC withdrawal request
+- `src/usdcx.ts`      - USDCx/xReserve constants + Ethereum/Stacks recipient encodings (no CONFIG, shared)
+- `src/usdcxWithdraw.ts` - `--usdcx-withdraw`: one `usdcx-v1.burn` to an Ethereum address
+- `src/console/`      - Local page helper (`npm run ui`): API, bot processes, env files, sBTC + USDCx bridge (`bridge.ts`, `usdcLive.ts`)
 - `src/plan.ts`       - Execute the rebalance plan (withdraw/swap/add)
 - `src/primitives.ts` - Market-making actions (swap/add/withdraw)
 - `src/swap.ts`       - DLMM swap router calls + output estimate
@@ -102,7 +143,12 @@ same CoinGecko feed + geometric curve (`POOL_STRATEGY=curve`, or the aliases
 The explicit-path flag is `--env`, never `--env-file`: Node >=20.6 has a
 built-in `--env-file` that swallows the argument before our parser runs.
 
-`SIGNER_KEY` / `SIGNER_ADDRESS` live in that env file. Metrics default to
+`SIGNER_KEY` / `SIGNER_ADDRESS` live in that env file. `KEY_SOURCE` records where
+the key came from (`create`, `import`, `phrase`, `app-phrase`) and `WALLET_ACCOUNT`
+the phrase account. The console's own phrase lives in `.mm-wallet` (0600, JSON
+`{phrase, backedUpAt}`), shared by every `app-phrase` bot at `m/44'/5757'/0'/0/<n>`;
+an unreadable `.mm-wallet` is never overwritten. An imported phrase is never stored.
+`POST /api/wallet/accounts` and the key/phrase backup routes are page-only. Metrics default to
 profile-scoped paths (`data/metrics.<name>.jsonl`). Set `METRICS_HTTP_PORT` per
 env file.
 
@@ -131,27 +177,34 @@ shape so nothing downstream knows which one is live:
   (Bitflow's own Rust market maker uses the ClusterIP `/api/mm/v1` inventory
   service, which is unreachable outside their cluster; `current-bins` is the
   public equivalent and applies the same freshness rules.)
-- **Pool id form.** `current-bins` keys off the alias (`dlmm_1`) and 404s on a
-  contract principal; the other `app/v2` routes are the reverse. v2 also nulls
-  `pool_token`/`core_address`, so the principal that post-conditions are built
-  against comes from `pool_id`.
+- **Pool id form.** `POOL_ID` is the pool's contract id
+  (`SM1F….dlmm-pool-sbtc-usdcx-v-1-bps-10`). Every v2 route accepts it; the quote
+  routes no longer accept the short aliases (`dlmm_1`, `dlmm_3`, ...) and 404. A legacy
+  alias in an env file is resolved once at startup through `app/v2/pools/{alias}`
+  (with a warning), and `npm run ui` rewrites known aliases in `.env.<pool>` files.
+  v2 also nulls `pool_token`/`core_address`, so the principal that post-conditions
+  are built against comes from `pool_id`.
 - **Empty positions.** v1 answers 404 (not an empty list) for a wallet that has
   never deployed to the pool, which is every wallet's first tick; that one case is
-  read as "no position" instead of tripping the api-error breaker.
+  read as "no position" instead of tripping the api-error breaker. v2's equivalent
+  is a 503 `NODE_POSITION_NOT_REGISTERED`; it is read as empty only when the wallet
+  has never sent a transaction (Hiro nonces), since any other wallet may own
+  liquidity the engine has not indexed yet.
 - **Tip freshness.** v2 serves quotes from in-memory state at the applied tip and
   has no stale-DB fallback (`X-Allow-Fallback` does not apply), so every tick
   gates on `quotes/v2/status`: the tick holds unless `tip_lag <= BFF_MAX_TIP_LAG`
   (default 0). A null `tip_lag` means the tip is unknown and is treated as stale,
   never as caught up.
-- **Bin shares.** Quote v2 documents the ladder's `liquidity` as always null (in
-  practice it is populated near the active bin and null in the dust tail). Shares
+- **Bin shares.** The ladder's `liquidity` can be null (in practice it is
+  populated near the active bin and null in the dust tail; Bitflow's samples stop
+  on null). Shares
   are the denominator for `minDlp`, so `resolveBinShares` falls back to the pool's
   `get-total-supply` for any bin the ladder does not price. Defaulting to zero
   instead would take `calcAddSlippage` down its empty-bin sqrt branch, which
   mis-sizes `minDlp` in either direction: too high aborts the add on-chain, too
   low forfeits slippage protection.
 
-No API key is required for the default 50 req/s per-IP tier and a tick spends
+No API key is required for the default 100 req/s per-IP tier and a tick spends
 about four calls; set `BFF_API_KEY` only if Bitflow issues one for a raised quota.
 
 The curve uses the `add_shaped_liquidity` step: it carries the shape (bin

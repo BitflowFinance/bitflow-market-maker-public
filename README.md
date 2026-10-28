@@ -6,10 +6,80 @@ A TypeScript market maker for **Bitflow DLMM** pools on Stacks. This public edit
 
 | Pair | Profile | Pool | Strategy |
 | --- | --- | --- | --- |
-| sBTC / USDCx | `--pool sbtc` | `dlmm_1` | `sbtc-usdcx-curve` |
-| STX / USDCx | `--pool stx` | `dlmm_14` | `stx-usdcx-curve` |
+| sBTC / USDCx | `--pool sbtc` | `…dlmm-pool-sbtc-usdcx-v-1-bps-10` | `sbtc-usdcx-curve` |
+| STX / USDCx | `--pool stx` | `…dlmm-pool-stx-usdcx-v-1-bps-10` | `stx-usdcx-curve` |
+
+`POOL_ID` is the pool's full contract id (deployer `SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD`); the example env files have it. Older files with `dlmm_1` / `dlmm_3` / `dlmm_14` still work: the bot looks the contract id up at startup and logs a warning.
+
+**Choosing a pool.** Each pair has several pools covering different price ranges. The page ranks them: a pool must have the curve's bin size, the market price inside its range with room to spare, and a pool price within the halt limit of the market; the deepest of those near the price is recommended. "Change pool" on the Settings tab moves a bot, and "Needs you" warns when the price nears the edge of a bot's pool.
+
+The STX profile used to point at `dlmm_14` (`…stx-usdcx-v-2-bps-10`), a pool with almost no liquidity. New STX bots now use the main pool (`…stx-usdcx-v-1-bps-10`, formerly `dlmm_3`). An existing `.env.stx` keeps the pool it names, because it may hold liquidity there. To move it: pause, withdraw everything, set `POOL_ID` to the new contract id, then resume.
 
 One process per pool (own wallet, own nonce space). Each process loads `.env.<name>` when you pass `--pool <name>`.
+
+## Local page
+
+A local page watches and controls the bots on this computer. It does not send the private key to the browser.
+
+```bash
+npm install
+npm run ui
+```
+
+Then open http://127.0.0.1:5191. Or ask your coding agent to "set up this repo and start the app"; [AGENTS.md](./AGENTS.md) has the steps.
+
+Preview bots are on the first screen. They have no wallet and the balances are fake. Create a real bot in the page. It always starts in dry run.
+
+There is no login. The helper listens on `127.0.0.1` only and refuses requests from other websites or hostnames.
+
+An agent uses the same helper: send JSON (`content-type: application/json`) to `http://127.0.0.1:4173`. Risky calls stay risky: dry run refuses manual trades, a withdraw must be paused first, and leaving dry run requires `confirmLive` plus the exact pool name.
+
+| Call | What it does |
+| --- | --- |
+| `GET /api/fleet` | All bots, the book, and “Needs you” |
+| `GET /api/bots/:id` | One bot, including logs, bins, limits, and settings |
+| `GET /api/pools?profile=stx` | Every pool of the pair, best first: range, price, market gap, liquidity near the price, and why a pool is skipped |
+| `POST /api/bots` | Create a bot. Body: `profile` (`sbtc` or `stx`), `wallet` (`create` or `import`), `signerKey` only when importing, and optionally `poolId` from the pool list. The response never contains the key. |
+| `POST /api/bots/:id/pool` | Change pools: pause, withdraw everything (live), confirm the old pool is empty, switch, stay paused. Body `poolId`, `acknowledged: true`, `poolName`. |
+| `GET /api/bots/:id/history?range=1d` | Value points for the chart (`1d`, `7d`, or `all`), thinned to about 300 |
+| `GET /api/bots/:id/decisions.csv` | Every recorded check as CSV |
+| `POST /api/bots/:id/pause` | Kill switch. Process stays up. Liquidity stays in the pool. |
+| `POST /api/bots/:id/resume` | Clear the kill switch |
+| `POST /api/pause-all` | Pause every running bot (the header's Pause all). Stopped bots are left alone. |
+| `POST /api/bots/:id/start` | Start the process |
+| `POST /api/bots/:id/stop` | Stop the process. Does not withdraw |
+| `POST /api/bots/:id/settings` | Save settings and restart. Body `settings`. Going live also needs `confirmLive: true` and `poolName`. |
+| `POST /api/bots/:id/baseline-reset` | Reset the profit starting point on the next valued check |
+| `POST /api/bots/:id/manual` | Swap, add, or withdraw. Live only. Body includes `acknowledged: true` and `poolName`. |
+| `POST /api/bots/:id/cash-out` | Pause and stop the bot, withdraw everything, and send all tokens and STX to the saved payout address. Works in dry run. Body `acknowledged: true` and `poolName`. |
+| `GET /api/bots/:id/cash-out` | Progress of the last cash out (`running`, `done`, or `failed`) with its steps and tx ids |
+| `GET /api/bots/:id/bridge` | The bot's sBTC deposit address, sBTC and USDCx limits and fees, and every bridge transfer |
+| `GET /api/bridge` | Every bot's bridge transfers, newest first |
+| `POST /api/bots/:id/bridge-deposit` | Make the bot's BTC deposit address. Nothing leaves the wallet. |
+| `POST /api/bots/:id/bridge-usdc-deposit` | Follow a USDC deposit sent from an Ethereum wallet. Body `ethTxid`, `amount`. Nothing leaves the bot wallet. |
+
+**Keep `npm run ui` running.** Bots started from the page stop when it stops: closing its terminal, restarting the computer, or letting it sleep all stop a live bot. Liquidity stays in the pool while it is stopped.
+
+**Wallets.** Each bot has a wallet of its own. When you create a bot, pick one of three:
+
+- **New wallet.** The page makes one recovery phrase, kept in `.mm-wallet` (readable only by your user), and gives each bot the next account of it (account 1, 2, 3…, the same accounts Leather and Xverse show). Save the phrase once, when the first bot is made; it restores every bot's wallet. Going live is blocked until it is backed up, and the Wallet tab can show it again.
+- **Recovery phrase.** Paste a 12 or 24 word phrase and pick an account. The page lists the first five, marking ones with history or already used by a bot here. Only that account's key is saved, in `.env.<bot>`; the phrase is not stored.
+- **Private key.** Paste the account's key as hex.
+
+Two bots can never share a wallet: the page refuses an address another bot already uses.
+
+**Cash out** goes only to a payout address you save on the Wallet tab. Saving or changing that address and showing the key work only in the page, not through the API, so an agent can cash out but cannot send funds anywhere else. If a cash out stops partway, run it again: each step reads live balances and finishes what is left. From the command line: `npm run tick -- --pool sbtc --cash-out --to SP… [--memo …]`.
+
+**Bridge** (its own page in the sidebar, and the Fund step of a new bot) moves BTC in and out through the official sBTC bridge, and USDC through Circle's xReserve:
+
+- **BTC → sBTC.** Each bot gets a Bitcoin deposit address. Send BTC to it from any wallet or exchange; the page finds the transaction and registers it with the sBTC signers itself, while `npm run ui` is running. The refund key is the bot's own key, so an unprocessed deposit can be reclaimed with the key you backed up after 950 Bitcoin blocks.
+- **sBTC → BTC.** Sends sBTC from the bot wallet to a Bitcoin address you type, like cash out: page only, the bot paused or stopped, and from sBTC in the wallet (not the pool). From the command line: `npm run tick -- --pool sbtc --sbtc-withdraw --amount <sats> --to bc1… --max-fee <sats>`.
+- **USDC → USDCx.** Connect an Ethereum wallet (MetaMask, Rabby, Coinbase Wallet) on the page; it approves the exact amount and calls xReserve's `depositToRemote` with the bot's Stacks address. The console never sees that wallet's key: the page hands it the transaction hash and it follows the deposit to the USDCx mint on Stacks (about 15 minutes, minimum 10 USDC, no fee beyond Ethereum gas, no STX needed to receive).
+- **USDCx → USDC.** Burns USDCx from the bot wallet to an Ethereum address you type, with the same rules as sBTC → BTC. Circle takes 2.00 USDC off the payout, which arrives in about an hour; the minimum is read from `usdcx-v1` (4.80 USDCx today). From the command line: `npm run tick -- --pool stx --usdcx-withdraw --amount <micro-USDCx> --to 0x…`.
+
+Ethereum is read through a public node (publicnode) by default; set `ETH_RPC_URL` in the environment of `npm run ui` to use your own.
+
+Transfers are kept in `data/bridge.<bot>.json`. To try the Bridge page without real BTC or USDC, run `npm run ui:demo`: balances and transfers are made up, move through each stage on a timer, and are kept apart in `data/bridge.<bot>.demo.json`. Default ports are `5191` for the page and `4173` for the API (`CONSOLE_PAGE_PORT`, `CONSOLE_API_PORT`).
 
 ## The curve (peaked at the active bin)
 
@@ -42,7 +112,7 @@ What you need before `npm install`. Facts only; how much to fund is your decisio
 
 1. **Node.js 20 or newer.**
 2. **A dedicated Stacks account.** Create a fresh account in a Stacks wallet (Leather, Xverse or similar) and use it only for this bot. Never point the bot at a wallet that holds anything else. Its `SP...` address is `SIGNER_ADDRESS`.
-3. **Its private key as hex** for `SIGNER_KEY`. Some wallet apps can show or copy an account's private key directly. If yours only shows the seed phrase, derive the key on a machine that is offline and never paste the seed phrase anywhere else:
+3. **Its private key as hex** for `SIGNER_KEY`. Some wallet apps can show or copy an account's private key directly. If yours only shows the seed phrase, the page's **Recovery phrase** option derives the account's key for you and stores only that key. For the command line, derive it on a machine that is offline and never paste the seed phrase anywhere else:
 
    ```bash
    npm install --no-save @stacks/wallet-sdk

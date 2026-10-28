@@ -65,3 +65,22 @@ npm run tick -- --pool sbtc
 3. Start again. The bot reads your on-chain bins on every tick: if they are in range it holds, if they have drifted it withdraws and rebuilds. It does not add a second curve on top of the first unless `ENABLE_WITHDRAW_LIQUIDITY=false`.
 
 If the start fails with `EADDRINUSE` on the metrics port, the previous process is still alive. Find and kill it before starting again. One process per pool, one wallet per process.
+
+## 6. Lost wallet files
+
+Each bot's key is `SIGNER_KEY` in its `.env.<bot>` file. Wallets the page created also come from the phrase in `.mm-wallet`, at account `WALLET_ACCOUNT` (Leather and Xverse show index 0 as Account 1).
+
+- **Env file lost, phrase saved:** import the phrase into Leather or Xverse and open that account, or create the bot again with **Recovery phrase** and pick the same account.
+- **`.mm-wallet` lost, env files intact:** the bots keep running on their own keys. The page will not make another app wallet until you restore `.mm-wallet` from your backup, and it shows each bot's own key to back up instead of a phrase.
+- **Both lost:** the funds are gone. Back up the phrase when the page asks.
+
+## 7. Bridge transfer stuck
+
+Transfers and the deposit address's scripts are in `data/bridge.<bot>.json`. Do not delete it while a transfer is open.
+
+- **BTC sent, nothing on the Bridge page:** the page only notices deposits while `npm run ui` is running. Start it; it keeps watching each deposit address for 30 days and registers the BTC with the signers when it finds it.
+- **Deposit failed:** the signers did not sweep it, so the BTC is still at the deposit address. After 950 Bitcoin blocks (about a week) it can be reclaimed with the bot's key, using the `reclaimScript` in the file (the `sbtc` package's `buildSbtcReclaimTx`). The page does not build this yet.
+- **Withdrawal failed after a Stacks tx:** check the transaction on the explorer before trying again. If it confirmed, the signers either send the BTC or return the sBTC to the bot wallet.
+- **USDC deposit stuck on Processing:** the page follows the Ethereum hash it was given. If you sped the transaction up in your wallet, the hash changed; the transfer still completes once the USDCx mint shows up, and is marked failed after 24 hours if nothing arrives. Check the hash on Etherscan.
+- **USDC deposit failed with "different Stacks address":** that transaction named another recipient, so the USDCx went there, not to this bot.
+- **USDCx withdrawal stuck on Processing:** Circle pays out in about an hour, by minting USDC to the address less 2.00 USDC (hover the tag for the step). The console searches forward from the burn a window of blocks at a time, so it still finds a payout made while it was off for days; it catches up a few seconds per window once restarted. If it never shows, check the address on Etherscan.

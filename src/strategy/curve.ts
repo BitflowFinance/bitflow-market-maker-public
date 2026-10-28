@@ -279,7 +279,7 @@ export const curve: Strategy = {
         logs.push({ level: 'warn', msg: `DECISION=rebalance type=derisk ${reason}` });
         const plan: RebalancePlan = {
           poolId,
-          type: 'reposition',
+          type: 'derisk',
           reason,
           targetBinId: activeBinId,
           steps,
@@ -287,7 +287,7 @@ export const curve: Strategy = {
           inventoryBlocked: false,
           inventoryRebalanceOnly: false,
         };
-        return mk({ decision: 'rebalance', planType: 'reposition', reason, plan });
+        return mk({ decision: 'rebalance', planType: 'derisk', reason, plan });
       } else {
         logs.push({
           level: 'warn',

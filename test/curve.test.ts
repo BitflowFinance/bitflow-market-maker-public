@@ -132,7 +132,7 @@ describe('curve strategy M5 de-risk swap', () => {
       const d = curve.decide(vHeavy());
       expect(d.decision).toBe('rebalance');
       expect(d.halt).toBeUndefined();
-      expect(d.planType).toBe('reposition');
+      expect(d.planType).toBe('derisk');
       // wallet base is 0, so we withdraw to source base then swap. The redeploy is
       // decoupled to the next tick (no add_shaped in the de-risk plan) because the
       // swap moves the active bin.

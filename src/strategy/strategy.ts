@@ -60,7 +60,7 @@ export interface StrategyHalt {
 // executes it through the global guards only.
 export interface StrategyDecision {
   decision: Decision;
-  planType: 'reposition' | 'within_bin' | null;
+  planType: 'reposition' | 'within_bin' | 'derisk' | null;
   target: TargetBin | null;
   binOffset: number | null;
   reason?: string;
