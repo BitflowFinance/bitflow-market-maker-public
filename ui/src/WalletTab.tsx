@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { BotView, KeyBackup as KeyBackupBody, api, explorerAddress, explorerTx } from './api';
 import { addressInput, clock, hexInput, shortAddr, tok } from './format';
 import { Link } from 'react-router-dom';
+import { holdsStray, trades } from './BridgePage';
 import { QrCode } from './QrCode';
 import { Card, CopyButton, Empty, Icon, Modal, RiskConfirm, downloadFile, useToast } from './ui';
 
@@ -194,16 +195,19 @@ function KeyCard({ bot, reload }: { bot: BotView; reload: () => Promise<void> })
   );
 }
 
-/** Shortcut to the Bridge page with this bot already chosen. */
+/** Shortcut to the Bridge page with this bot and its bridgeable token already chosen. */
 function BridgeCard({ bot }: { bot: BotView }) {
-  const trades = bot.baseSymbol === 'sBTC' || bot.quoteSymbol === 'sBTC';
-  const stray = bot.strayTokens.some((token) => token.symbol === 'sBTC' && token.amount > 0);
-  if (!trades && !stray) return null;
+  const symbol = ['sBTC', 'USDCx'].find((item) => trades(bot, item) || holdsStray(bot, item));
+  if (!symbol) return null;
+  const query = new URLSearchParams({ bot: bot.id });
+  if (symbol === 'USDCx') query.set('asset', 'usdc');
+  // A token the bot only holds by mistake can only leave.
+  if (!trades(bot, symbol)) query.set('dir', 'out');
   return (
     <Card title="Bridge">
       <p className="muted">Bridge assets in and out of this wallet.</p>
       <div>
-        <Link to={`/bridge?bot=${encodeURIComponent(bot.id)}${trades ? '' : '&dir=out'}`} className="btn">
+        <Link to={`/bridge?${query}`} className="btn">
           Go to Bridge
           <Icon name="arrow" />
         </Link>

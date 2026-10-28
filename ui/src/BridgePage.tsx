@@ -425,8 +425,8 @@ const ASSETS: Record<BridgeAsset, { symbol: string; label: string; dirs: [string
   usdc: { symbol: 'USDCx', label: 'USDC', dirs: ['USDC → USDCx', 'USDCx → USDC'] },
 };
 
-const trades = (bot: BotView, symbol: string): boolean => bot.baseSymbol === symbol || bot.quoteSymbol === symbol;
-const holdsStray = (bot: BotView, symbol: string): boolean => bot.strayTokens.some((token) => token.symbol === symbol && token.amount > 0);
+export const trades = (bot: BotView, symbol: string): boolean => bot.baseSymbol === symbol || bot.quoteSymbol === symbol;
+export const holdsStray = (bot: BotView, symbol: string): boolean => bot.strayTokens.some((token) => token.symbol === symbol && token.amount > 0);
 
 export function BridgePage({ fleet }: Shared) {
   const [params, setParams] = useSearchParams();
