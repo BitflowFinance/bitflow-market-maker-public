@@ -12,7 +12,12 @@ import { Dot, Icon, ToastHost, useNow, useToast } from './ui';
 type ThemeMode = 'light' | 'dark';
 
 const savedMode = (): ThemeMode => {
-  const saved = localStorage.getItem('bitflow-mode');
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem('bitflow-mode');
+  } catch {
+    // Blocked storage must not stop the page loading; the system theme applies.
+  }
   if (saved === 'light' || saved === 'dark') return saved;
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 };
@@ -64,7 +69,11 @@ export function App() {
 
   const toggle = () => {
     const next = mode === 'dark' ? 'light' : 'dark';
-    localStorage.setItem('bitflow-mode', next);
+    try {
+      localStorage.setItem('bitflow-mode', next);
+    } catch {
+      // The theme still switches for this visit.
+    }
     setMode(next);
   };
 

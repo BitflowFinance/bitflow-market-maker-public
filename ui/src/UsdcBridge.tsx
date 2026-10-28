@@ -283,10 +283,17 @@ export function UsdcIn({ bot, view, reload, target }: { bot: BotView; view: Brid
         // maxFee 0: Stacks' relayer mints for free, as the official bridge app sends it.
         args: [value, u.domain, u.recipient as `0x${string}`, token, BigInt(0), '0x'],
       });
-      await api(`/api/bots/${encodeURIComponent(bot.id)}/bridge-usdc-deposit`, 'POST', { ethTxid: hash, amount: amount.trim() });
+      // The USDC has left the wallet from here on, so a failure to record it must
+      // never read as a failed deposit, or the user may send it again.
       setAmount('');
-      toast('good', 'Deposit sent. Follow it under Activity.');
-      await reload();
+      try {
+        await api(`/api/bots/${encodeURIComponent(bot.id)}/bridge-usdc-deposit`, 'POST', { ethTxid: hash, amount: amount.trim() });
+        toast('good', 'Deposit sent. Follow it under Activity.');
+      } catch {
+        setError(`Deposit sent (${shortAddr(hash)}), but this app could not start tracking it. Do not send it again; it still arrives as USDCx in about 15 minutes.`);
+      }
+      // A failed refresh must not replace that warning with its own error.
+      await reload().catch(() => undefined);
       void readBalances();
     } catch (err) {
       const text = err instanceof Error ? err.message : String(err);

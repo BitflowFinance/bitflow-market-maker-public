@@ -21,6 +21,8 @@ const KEEP_TRANSFERS = 50;
 const ETH_DEPOSIT_GIVE_UP_MS = 24 * 3600_000;
 /** Circle's payout is the burn less its fee; a payout further off than this is someone else's. */
 const PAYOUT_SLACK_MICRO = 3 * WITHDRAW_FEE_MICRO;
+/** A load-balanced RPC can answer from a node a few blocks behind, so each search re-reads the tail of the last one. */
+const PAYOUT_RESCAN_BLOCKS = 64;
 
 // Vsizes the dapp uses to size the signers' fee: a deposit is swept with a
 // taproot script-path input; a withdrawal adds an input and an output to their
@@ -57,8 +59,18 @@ export interface UsdcClient {
   deposit(ethTxid: string): Promise<EthDeposit | null>;
   /** The Stacks mint of exactly `amount` micro-USDCx to the address since `sinceMs`, skipping mints already matched. */
   findMint(stacksAddress: string, amount: number, sinceMs: number, skip: string[]): Promise<string | null>;
-  /** Circle's USDC payout to the address from `fromBlock` on, within `minValue..maxValue`. */
-  findPayout(ethAddress: string, fromBlock: number, minValue: number, maxValue: number, skip: string[]): Promise<{ ethTxid: string; value: number } | null>;
+  /**
+   * Circle's USDC payout to the address within `minValue..maxValue`, searched in
+   * one bounded window from `fromBlock`. `scannedTo` is the last block that window
+   * covered, so the caller can move on from there next time.
+   */
+  findPayout(
+    ethAddress: string,
+    fromBlock: number,
+    minValue: number,
+    maxValue: number,
+    skip: string[],
+  ): Promise<{ found: { ethTxid: string; value: number } | null; scannedTo: number }>;
   /** usdcx-v1's `get-min-withdrawal-amount`, in micro-USDCx. */
   minWithdraw(): Promise<number>;
 }
@@ -89,7 +101,7 @@ export const noBridge: BridgeClient = {
     ethHead: () => Promise.reject(new Error('bridging is not connected')),
     deposit: () => Promise.resolve(null),
     findMint: () => Promise.resolve(null),
-    findPayout: () => Promise.resolve(null),
+    findPayout: (_address, fromBlock) => Promise.resolve({ found: null, scannedTo: fromBlock }),
     minWithdraw: () => Promise.reject(new Error('bridging is not connected')),
   },
 };
@@ -131,6 +143,8 @@ export interface BridgeTransfer {
   ethAddress?: string;
   /** Ethereum block when the burn was sent; Circle's payout is searched for from here. */
   ethBlock?: number;
+  /** The last Ethereum block searched for the payout, so a console closed for days catches up window by window. */
+  ethScanned?: number;
   /** What actually arrived, when it differs from `amount` (Circle's fee comes off a USDC payout). */
   received?: number;
 }
@@ -384,14 +398,16 @@ export class BridgeBook {
 
   private async followUsdcWithdrawal(client: UsdcClient, transfer: BridgeTransfer, now: Date): Promise<void> {
     try {
-      const payout = await client.findPayout(
+      const from = Math.max(transfer.ethBlock || 0, (transfer.ethScanned ?? 0) - PAYOUT_RESCAN_BLOCKS);
+      const { found, scannedTo } = await client.findPayout(
         transfer.ethAddress || '',
-        transfer.ethBlock || 0,
+        from,
         Math.max(1, transfer.amount - PAYOUT_SLACK_MICRO),
         transfer.amount,
         this.claimed('ethTxid', transfer),
       );
-      if (payout) this.update(transfer.id, { status: 'done', ethTxid: payout.ethTxid, received: payout.value, message: 'USDC sent.' }, now);
+      if (found) this.update(transfer.id, { status: 'done', ethTxid: found.ethTxid, received: found.value, message: 'USDC sent.' }, now);
+      else if (scannedTo > (transfer.ethScanned ?? 0)) this.update(transfer.id, { ethScanned: scannedTo }, now);
     } catch {
       // Circle pays out in roughly an hour; the next pass retries.
     }

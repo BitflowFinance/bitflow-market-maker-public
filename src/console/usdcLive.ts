@@ -4,8 +4,8 @@ import { EthDeposit, UsdcClient } from './bridge';
 import { MIN_WITHDRAW_MICRO, USDCX_BRIDGE, USDCX_TOKEN, USDCX_ASSET, USDC_ETHEREUM, XRESERVE } from '../usdcx';
 
 const HIRO = 'https://api.hiro.so';
-// publicnode serves eth_getLogs over ~5000 blocks without a key, which covers a
-// payout's hour many times over. ETH_RPC_URL swaps in your own node.
+// publicnode serves eth_getLogs over ~5000 blocks without a key, so a payout is
+// searched one window at a time, forward from the burn. ETH_RPC_URL swaps in your own node.
 const DEFAULT_RPC = 'https://ethereum-rpc.publicnode.com';
 const LOG_WINDOW = 4000;
 const MIN_FRESH_MS = 10 * 60_000;
@@ -79,20 +79,22 @@ export const liveUsdcClient = (rpcUrl = process.env.ETH_RPC_URL || DEFAULT_RPC):
     },
     findPayout: async (ethAddress, fromBlock, minValue, maxValue, skip) => {
       const latest = await head();
+      const from = Math.min(Math.max(0, fromBlock), latest);
+      const to = Math.min(latest, from + LOG_WINDOW);
       const logs = await rpc<RpcLog[]>('eth_getLogs', [
         {
           address: USDC_ETHEREUM,
           // Circle pays out by minting fresh USDC to the recipient.
           topics: [TRANSFER_TOPIC, ZERO_WORD, word(ethAddress)],
-          fromBlock: `0x${Math.max(fromBlock, latest - LOG_WINDOW).toString(16)}`,
-          toBlock: 'latest',
+          fromBlock: `0x${from.toString(16)}`,
+          toBlock: `0x${to.toString(16)}`,
         },
       ]);
       for (const log of logs) {
         const value = Number(BigInt(log.data));
-        if (value >= minValue && value <= maxValue && !skip.includes(log.transactionHash)) return { ethTxid: log.transactionHash, value };
+        if (value >= minValue && value <= maxValue && !skip.includes(log.transactionHash)) return { found: { ethTxid: log.transactionHash, value }, scannedTo: to };
       }
-      return null;
+      return { found: null, scannedTo: to };
     },
     minWithdraw: async () => {
       if (min && Date.now() - min.at < MIN_FRESH_MS) return min.value;

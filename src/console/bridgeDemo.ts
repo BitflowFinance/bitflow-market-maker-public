@@ -83,9 +83,10 @@ export const demoBridge = (): DemoBridge => {
       },
       // Keyed by amount: the demo's deposits are one per click, so that is enough to tell them apart.
       findMint: (_address, amount, sinceMs) => Promise.resolve(Date.now() - sinceMs < 2 * STAGE_MS ? null : `0x${idFor(`mint:${amount}:${sinceMs}`)}`),
+      // Keyed without the block: the search window moves on every pass.
       findPayout: (address, fromBlock, _min, max) => {
-        const key = `payout:${address}:${fromBlock}:${max}`;
-        return Promise.resolve(age(key) < 2 * STAGE_MS ? null : { ethTxid: `0x${idFor(key)}`, value: max - WITHDRAW_FEE_MICRO });
+        const key = `payout:${address}:${max}`;
+        return Promise.resolve({ found: age(key) < 2 * STAGE_MS ? null : { ethTxid: `0x${idFor(key)}`, value: max - WITHDRAW_FEE_MICRO }, scannedTo: fromBlock });
       },
       minWithdraw: () => Promise.resolve(4_800_000),
     },

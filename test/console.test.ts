@@ -65,7 +65,8 @@ const fakeBridge = () => {
     rate: 2,
     ethReceipts: new Map<string, EthDeposit>(),
     mints: [] as Array<{ address: string; amount: number; txid: string }>,
-    payouts: [] as Array<{ address: string; value: number; ethTxid: string }>,
+    payouts: [] as Array<{ address: string; value: number; ethTxid: string; block?: number }>,
+    ethHead: 21_000_000,
   };
   const client: BridgeClient = {
     signersKey: () => Promise.resolve(state.signers),
@@ -82,12 +83,18 @@ const fakeBridge = () => {
     feeRate: () => Promise.resolve(state.rate),
     limits: () => Promise.resolve({ minDepositSats: 10_000, maxWithdrawSats: 5_000_000_000 }),
     usdc: {
-      ethHead: () => Promise.resolve(21_000_000),
+      ethHead: () => Promise.resolve(state.ethHead),
       deposit: (ethTxid) => Promise.resolve(state.ethReceipts.get(ethTxid) || null),
       findMint: (address, amount, _since, skip) =>
         Promise.resolve(state.mints.find((m) => m.address === address && m.amount === amount && !skip.includes(m.txid))?.txid || null),
-      findPayout: (address, _from, min, max, skip) =>
-        Promise.resolve(state.payouts.find((p) => p.address === address && p.value >= min && p.value <= max && !skip.includes(p.ethTxid)) || null),
+      // Like the live client: one window of at most 4000 blocks from `from`, capped at the head.
+      findPayout: (address, from, min, max, skip) => {
+        const to = Math.min(state.ethHead, from + 4000);
+        const found = state.payouts.find(
+          (p) => p.address === address && p.value >= min && p.value <= max && !skip.includes(p.ethTxid) && (p.block ?? from) >= from && (p.block ?? from) <= to,
+        );
+        return Promise.resolve({ found: found ? { ethTxid: found.ethTxid, value: found.value } : null, scannedTo: to });
+      },
       minWithdraw: () => Promise.resolve(4_800_000),
     },
   };
@@ -459,8 +466,12 @@ describe('local console', () => {
     bridge.state.payouts.push({ address: to, value: 5_000_000, ethTxid: '0xother' });
     await store.syncBridges(new Date());
     expect((await store.bridgeView('stx')).transfers[0].status).toBe('processing');
-    bridge.state.payouts.push({ address: to, value: 23_000_000, ethTxid: '0xpay' });
+    // Paid 13,000 blocks later while the console was closed: found by walking forward window by window.
+    bridge.state.payouts.push({ address: to, value: 23_000_000, ethTxid: '0xpay', block: 21_013_000 });
+    bridge.state.ethHead = 21_020_000;
     await store.syncBridges(new Date());
+    expect((await store.bridgeView('stx')).transfers[0]).toMatchObject({ status: 'processing', ethScanned: 21_004_000 });
+    for (let pass = 0; pass < 4; pass += 1) await store.syncBridges(new Date());
     view = await store.bridgeView('stx');
     expect(view.transfers[0]).toMatchObject({ status: 'done', ethTxid: '0xpay', received: 23_000_000 });
   });
