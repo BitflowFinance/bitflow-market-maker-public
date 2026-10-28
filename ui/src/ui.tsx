@@ -10,7 +10,8 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   plus: <path d="M8 3v10M3 8h10" />,
-  bridge: <path d="M1.8 10.5h12.4M3.5 10.5V7.8a4.5 4.5 0 0 1 9 0v2.7M6.2 10.5V8.4M9.8 10.5V8.4M2.5 5.5l2 1M13.5 5.5l-2 1" />,
+  // A stone arch bridge: one block with the arch cut out, which stays legible at 14px.
+  bridge: <path d="M3 4.5h10a1.5 1.5 0 0 1 1.5 1.5v7h-3v-1.5a3.5 3.5 0 0 0-7 0V13h-3V6A1.5 1.5 0 0 1 3 4.5z" />,
   pause: <path d="M5.5 3.5v9M10.5 3.5v9" />,
   play: <path d="M5 3.2v9.6L12.5 8z" />,
   stop: <rect x="4" y="4" width="8" height="8" rx="1" />,
@@ -172,6 +173,19 @@ export function Empty({ icon, title, children }: { icon: IconName; title: string
         {children ? <div className="empty-b">{children}</div> : null}
       </div>
     </div>
+  );
+}
+
+/** "Balance: 1.20 USDCx" above an amount field; clicking it fills the field. Plain text when there is nothing to fill. */
+/** Rows a long list shows before its Show all button. */
+export const SHORT_LIST = 10;
+
+export function BalanceFill({ text, onFill }: { text: string; onFill?: (() => void) | null }) {
+  if (!onFill) return <span className="balfill-off">Balance: {text}</span>;
+  return (
+    <button type="button" className="balfill" title="Use this amount" onClick={onFill}>
+      Balance: {text}
+    </button>
   );
 }
 

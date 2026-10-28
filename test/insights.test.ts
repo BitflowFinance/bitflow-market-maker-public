@@ -130,6 +130,17 @@ describe('overview fields', () => {
     binsHavePoolDepth: false,
   });
 
+  it('values a stopped bot from its live wallet, not a check from before it was funded', () => {
+    const stale = { walletBase: 0, walletQuote: 0, ownedBase: 0.001, ownedQuote: 50, portfolioValue: 150 };
+    const liveWallet = { base: 0.002, quote: 30, stx: 1, asOf: new Date(NOW).toISOString() };
+    const stopped = toView({ ...record(stale), running: false, liveWallet }, false, NOW);
+    // (0.002 wallet + 0.001 pooled) sBTC at 100,000, plus 30 + 50 USDCx.
+    expect(stopped.portfolioValue).toBeCloseTo(380, 6);
+    expect(stopped.inventoryShare).toBeCloseTo(300 / 380, 6);
+    // A running bot's own check is seconds old and stays the source.
+    expect(toView({ ...record(stale), liveWallet }, false, NOW).portfolioValue).toBe(150);
+  });
+
   it('warns before the fee tank runs dry, not after', () => {
     const low = toView(record({ walletStx: 0.5 }), false, NOW);
     expect(low.gasTxLeft).toBe(10);

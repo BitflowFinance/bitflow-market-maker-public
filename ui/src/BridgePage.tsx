@@ -1,10 +1,11 @@
 import { ReactNode, useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { BotView, BridgeTransfer, BridgeView, api, botPath, explorerAddress, explorerTx, mempoolAddress, mempoolTx } from './api';
+import { BotView, BridgeAsset, BridgeTransfer, BridgeView, api, botPath, etherscanAddress, etherscanTx, explorerAddress, explorerTx, mempoolAddress, mempoolTx } from './api';
 import type { Shared } from './App';
 import { addressInput, ago, clock, decimalInput, shortAddr, tok } from './format';
 import { QrCode } from './QrCode';
-import { Card, CopyButton, Empty, Icon, RiskConfirm, useNow, useToast } from './ui';
+import { BalanceFill, Card, SHORT_LIST, CopyButton, Empty, Icon, RiskConfirm, useNow, useToast } from './ui';
+import { MIN_STX_FOR_FEE, NeedsStx, OutBlocked, UsdcIn, UsdcOut, usdc } from './UsdcBridge';
 
 const coins = (sats: number): string => (sats / 1e8).toFixed(8).replace(/0+$/, '').replace(/\.$/, '');
 const btc = (sats: number | null | undefined, unit = 'BTC'): string => (sats == null ? '—' : `${coins(sats)} ${unit}`);
@@ -12,9 +13,6 @@ const btc = (sats: number | null | undefined, unit = 'BTC'): string => (sats == 
 const satsText = (sats: number): string => `${sats.toLocaleString('en-US')} sats`;
 
 const open = (transfer: BridgeTransfer): boolean => transfer.status !== 'done' && transfer.status !== 'failed';
-
-// A bridge request costs a fraction of this in STX fees; below it the request would fail to send.
-const MIN_STX_FOR_FEE = 0.05;
 
 /**
  * The bot's bridge state, refreshed while the page is open. With `ensureAddress`
@@ -47,21 +45,32 @@ export const useBridge = (botId: string | null, ensureAddress: boolean, watching
 };
 
 /** Where to send BTC so it arrives in the bot wallet as sBTC. Also used on the Fund step of a new bot. */
-export function DepositPanel({ view }: { view: BridgeView }) {
+export function DepositPanel({ view, target }: { view: BridgeView; target?: ReactNode }) {
   const deposit = view.deposit;
-  if (!deposit) return <p className="muted">Getting a deposit address…</p>;
+  if (!deposit) {
+    return (
+      <div className="dep">
+        <p className="muted">Getting a deposit address…</p>
+        {target}
+      </div>
+    );
+  }
   return (
     <div className="dep">
       {view.demo ? <p className="dep-warn">Demo address. Do not send real BTC to it.</p> : null}
       {!view.tradesSbtc ? <p className="dep-warn">This bot does not trade sBTC.</p> : null}
-      <div className="dep-main">
-        <QrCode text={deposit.address} size={128} />
-        <div className="dep-addr">
-          <span className="field-l">Deposit address</span>
-          <span className="mono dep-v">{deposit.address}</span>
-          <CopyButton text={deposit.address} label="Copy" />
+      <div className="field">
+        <span className="field-l">From</span>
+        <div className="dep-main">
+          <QrCode text={deposit.address} size={128} />
+          <div className="dep-addr">
+            <span className="field-l">Deposit address</span>
+            <span className="mono dep-v">{deposit.address}</span>
+            <CopyButton text={deposit.address} label="Copy" />
+          </div>
         </div>
       </div>
+      {target}
       <dl className="kv">
         <div>
           <dt>Minimum</dt>
@@ -104,78 +113,131 @@ const botLabelOf = (bot: BotView): string => bot.name || bot.pair;
 
 type AnyTransfer = BridgeTransfer & { botId?: string };
 
-const STATUS: Record<BridgeTransfer['kind'], Record<BridgeTransfer['status'], string>> = {
-  deposit: { sending: 'Detected', sent: 'Detected', processing: 'Minting', done: 'Done', failed: 'Failed' },
-  withdraw: { sending: 'Signing', sent: 'Signing', processing: 'Sending BTC', done: 'Done', failed: 'Failed' },
+// One word per state; the tracker's own message (on hover) says which step it is on.
+const STATUS: Record<BridgeTransfer['status'], string> = { sending: 'Processing', sent: 'Processing', processing: 'Processing', done: 'Success', failed: 'Failed' };
+const DIRECTION: Record<BridgeAsset, Record<BridgeTransfer['kind'], string>> = {
+  btc: { deposit: 'BTC → sBTC', withdraw: 'sBTC → BTC' },
+  usdc: { deposit: 'USDC → USDCx', withdraw: 'USDCx → USDC' },
 };
+const amountOf = (t: BridgeTransfer): string => (t.asset === 'usdc' ? usdc(t.amount, t.kind === 'deposit' ? 'USDC' : 'USDCx') : btc(t.amount));
 const TONE: Record<BridgeTransfer['status'], string> = { sending: 't-info', sent: 't-info', processing: 't-info', done: 't-good', failed: 't-serious' };
+
+/** The transfer's transactions in the order they happen: the sending chain's first. */
+const txLinks = (t: BridgeTransfer): Array<{ label: string; href: string }> => {
+  const outside = [
+    t.btcTxid ? { label: 'Bitcoin', href: mempoolTx(t.btcTxid) } : null,
+    t.ethTxid ? { label: 'Ethereum', href: etherscanTx(t.ethTxid) } : null,
+  ].filter((link): link is { label: string; href: string } => link != null);
+  const stacks = t.stacksTxid ? [{ label: 'Stacks', href: explorerTx(t.stacksTxid) }] : [];
+  return t.kind === 'deposit' ? [...outside, ...stacks] : [...stacks, ...outside];
+};
 
 function Activity({ transfers, bots }: { transfers: AnyTransfer[]; bots: BotView[] }) {
   const now = useNow(30_000);
+  const [showAll, setShowAll] = useState(false);
   if (!transfers.length) return <p className="muted">No transfers yet.</p>;
+  const rows = showAll ? transfers : transfers.slice(0, SHORT_LIST);
   return (
-    <ul className="act">
-      {transfers.map((t) => (
-        <li key={`${t.botId || ''}-${t.id}`}>
-          <div className="act-main">
-            <span className="act-dir">{t.kind === 'deposit' ? 'BTC → sBTC' : 'sBTC → BTC'}</span>
-            <span className="act-amt num">{btc(t.amountSats)}</span>
-            {(() => {
-              const owner = bots.find((item) => item.id === t.botId);
-              return owner ? (
-                <span className="act-sub">
-                  {botLabelOf(owner)} ·{' '}
-                  <a className="mono" href={explorerAddress(owner.address || '')} target="_blank" rel="noreferrer" title={owner.address || ''}>
-                    {shortAddr(owner.address)}
+    <>
+      <ul className="act">
+        {rows.map((t) => (
+          <li key={`${t.botId || ''}-${t.id}`}>
+            <div className="act-main">
+              <span className="act-dir">{DIRECTION[t.asset][t.kind]}</span>
+              <span className="act-amt num">{amountOf(t)}</span>
+              {(() => {
+                const owner = bots.find((item) => item.id === t.botId);
+                if (!owner) return null;
+                const botEnd = (
+                  <>
+                    <Link to={botPath(owner)}>{botLabelOf(owner)}</Link> (
+                    <a className="mono" href={explorerAddress(owner.address || '')} target="_blank" rel="noreferrer" title={owner.address || ''}>
+                      {shortAddr(owner.address)}
+                    </a>
+                    )
+                  </>
+                );
+                const outside = t.depositAddress
+                  ? { href: mempoolAddress(t.depositAddress), text: t.depositAddress }
+                  : t.btcAddress
+                    ? { href: mempoolAddress(t.btcAddress), text: t.btcAddress }
+                    : t.ethAddress
+                      ? { href: etherscanAddress(t.ethAddress), text: t.ethAddress }
+                      : null;
+                const outsideEnd = outside ? (
+                  <a className="mono" href={outside.href} target="_blank" rel="noreferrer" title={outside.text}>
+                    {shortAddr(outside.text)}
                   </a>
-                  {t.kind === 'withdraw' && t.btcAddress ? (
-                    <>
-                      {' → '}
-                      <a className="mono" href={mempoolAddress(t.btcAddress)} target="_blank" rel="noreferrer" title={t.btcAddress}>
-                        {shortAddr(t.btcAddress)}
-                      </a>
-                    </>
-                  ) : null}
-                </span>
-              ) : null;
-            })()}
-          </div>
-          <span className={`tag ${TONE[t.status]}`}>{STATUS[t.kind][t.status]}</span>
-          <span className="act-end">
-            {t.btcTxid ? (
-              <a href={mempoolTx(t.btcTxid)} target="_blank" rel="noreferrer" title="Bitcoin transaction">
-                Bitcoin tx <Icon name="external" size={10} />
-              </a>
-            ) : null}
-            {t.stacksTxid ? (
-              <a href={explorerTx(t.stacksTxid)} target="_blank" rel="noreferrer" title="Stacks transaction">
-                Stacks tx <Icon name="external" size={10} />
-              </a>
-            ) : null}
-            <span className="act-t" title={clock(t.createdAt)}>
-              {ago(t.createdAt, now)}
+                ) : null;
+                // Written in the direction the money moves: deposits arrive at the bot, withdrawals leave it.
+                const [from, to] = t.kind === 'deposit' ? [outsideEnd, botEnd] : [botEnd, outsideEnd];
+                return (
+                  <span className="act-sub">
+                    {from ? (
+                      <>
+                        {from}
+                        {' → '}
+                      </>
+                    ) : (
+                      '→ '
+                    )}
+                    {to}
+                  </span>
+                );
+              })()}
+            </div>
+            <span className={`tag ${TONE[t.status]}`} title={t.status === 'failed' ? undefined : t.message || undefined}>
+              {STATUS[t.status]}
             </span>
-          </span>
-          {t.status === 'failed' ? <p className="act-why">{t.message}</p> : null}
-        </li>
-      ))}
-    </ul>
+            <span className="act-end">
+              {txLinks(t).map((link) => (
+                <a key={link.href} href={link.href} target="_blank" rel="noreferrer" title={`${link.label} transaction`}>
+                  {link.label} tx <Icon name="external" size={10} />
+                </a>
+              ))}
+              <span className="act-t" title={clock(t.createdAt)}>
+                {ago(t.createdAt, now)}
+              </span>
+            </span>
+            {t.status === 'failed' ? <p className="act-why">{t.message}</p> : null}
+          </li>
+        ))}
+      </ul>
+      {transfers.length > SHORT_LIST ? (
+        <div className="tbl-more">
+          <button type="button" className="btn sm ghost" onClick={() => setShowAll(!showAll)}>
+            {showAll ? 'Show fewer' : `Show all ${transfers.length}`}
+          </button>
+        </div>
+      ) : null}
+    </>
   );
 }
 
 const PAGE = 5;
 
+/** A fixed "To" for one bot, where there is nothing to pick (the new-bot Fund step). */
+export function BotTo({ bot, view, symbol }: { bot: BotView; view: BridgeView | null; symbol: string }) {
+  return (
+    <div className="field">
+      <span className="field-l">To</span>
+      <WalletPick bots={[bot]} bot={bot} view={view} symbol={symbol} onPick={() => undefined} />
+    </div>
+  );
+}
+
 /**
  * The bot wallet. Only the chosen one shows; Change opens the list, a few at a
  * time, so ten bots do not fill the page.
  */
-function WalletPick({ bots, bot, view, onPick }: { bots: BotView[]; bot: BotView; view: BridgeView | null; onPick: (id: string) => void }) {
+function WalletPick({ bots, bot, view, symbol, onPick }: { bots: BotView[]; bot: BotView; view: BridgeView | null; symbol: string; onPick: (id: string) => void }) {
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(PAGE);
   const card = (item: BotView, end: ReactNode) => {
     // The chosen bot's figure comes from the bridge read, which is fresher (and is the demo's in demo mode).
-    const chain = item.liveWallet ? (item.baseSymbol === 'sBTC' ? item.liveWallet.base : item.quoteSymbol === 'sBTC' ? item.liveWallet.quote : null) : null;
-    const held = item.id === bot.id && view?.withdraw.heldSats != null ? view.withdraw.heldSats / 1e8 : chain;
+    const chain = item.liveWallet ? (item.baseSymbol === symbol ? item.liveWallet.base : item.quoteSymbol === symbol ? item.liveWallet.quote : null) : null;
+    const fresh = symbol === 'sBTC' ? (view?.withdraw.heldSats != null ? view.withdraw.heldSats / 1e8 : null) : view?.usdc.held != null ? view.usdc.held / 1e6 : null;
+    const held = item.id === bot.id && fresh != null ? fresh : chain;
     return (
       <>
         <span className="choice-body">
@@ -185,7 +247,7 @@ function WalletPick({ bots, bot, view, onPick }: { bots: BotView[]; bot: BotView
             <a className="mono" href={explorerAddress(item.address || '')} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
               {shortAddr(item.address)}
             </a>
-            {held != null ? ` · ${tok(held, 'sBTC')}` : ''}
+            {held != null ? ` · ${tok(held, symbol)}` : ''}
           </span>
         </span>
         {end}
@@ -273,15 +335,6 @@ function BridgeOut({ bot, view, reload }: { bot: BotView; view: BridgeView; relo
   const noStx = view.stx != null && view.stx < MIN_STX_FOR_FEE;
   const ready = sats != null && !amountProblem && Boolean(address.trim()) && !addressProblem && !w.blocked && !noStx;
 
-  const pause = async () => {
-    try {
-      await api(`/api/bots/${encodeURIComponent(bot.id)}/pause`, 'POST', {});
-      await reload();
-    } catch (err) {
-      toast('bad', err instanceof Error ? err.message : 'Could not pause the bot.');
-    }
-  };
-
   const send = async () => {
     setBusy(true);
     setError('');
@@ -301,40 +354,25 @@ function BridgeOut({ bot, view, reload }: { bot: BotView; view: BridgeView; relo
 
   return (
     <div className="bout">
-      {w.blocked ? (
-        <div className="banner2 info center">
-          <Icon name="info" />
-          <div className="grow">{w.blocked}</div>
-          {w.blocked.startsWith('Pause') ? (
-            <button type="button" className="btn sm" onClick={() => void pause()}>
-              Pause
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      <OutBlocked bot={bot} blocked={w.blocked} reload={reload} />
       <label className="field">
+        <span className="field-l">To</span>
+        <input className="in mono" placeholder="Your Bitcoin address (bc1…)" value={address} onChange={(e) => setAddress(addressInput(e.target.value))} spellCheck={false} autoComplete="off" />
+        {addressProblem ? <span className="sf-h bad">{addressProblem}</span> : null}
+      </label>
+      <div className="field">
         <span className="field-row">
           <span className="field-l">Amount</span>
           <span className="field-aside">
-            Balance {btc(w.heldSats, 'sBTC')}
-            {max != null && max >= w.minSats ? (
-              <button type="button" className="linkbtn" onClick={() => setAmount(coins(max))}>
-                Max
-              </button>
-            ) : null}
+            <BalanceFill text={btc(w.heldSats, 'sBTC')} onFill={max ? () => setAmount(coins(max)) : null} />
           </span>
         </span>
         <span className="in-unit">
-          <input className="in in-lg" inputMode="decimal" placeholder="0.00" value={amount} onChange={(e) => setAmount(decimalInput(e.target.value, 8))} />
+          <input className="in in-lg" inputMode="decimal" autoComplete="off" placeholder="0.00" value={amount} onChange={(e) => setAmount(decimalInput(e.target.value, 8))} />
           <span className="unit">sBTC</span>
         </span>
         {amountProblem ? <span className="sf-h bad">{amountProblem}</span> : null}
-      </label>
-      <label className="field">
-        <span className="field-l">Bitcoin address</span>
-        <input className="in mono" placeholder="bc1…" value={address} onChange={(e) => setAddress(addressInput(e.target.value))} spellCheck={false} autoComplete="off" />
-        {addressProblem ? <span className="sf-h bad">{addressProblem}</span> : null}
-      </label>
+      </div>
       <dl className="kv">
         <div>
           <dt>You receive</dt>
@@ -349,11 +387,7 @@ function BridgeOut({ bot, view, reload }: { bot: BotView; view: BridgeView; relo
           <dd>About an hour</dd>
         </div>
       </dl>
-      {noStx ? (
-        <p className="sf-h bad">
-          The bot wallet needs a little STX for the network fee. <Link to={`${botPath(bot)}?tab=wallet`}>Add STX</Link>
-        </p>
-      ) : null}
+      {noStx ? <NeedsStx bot={bot} /> : null}
       {error && !confirm ? <p className="form-err">{error}</p> : null}
       <button type="button" className="btn primary wide" disabled={!ready} onClick={() => setConfirm(true)}>
         Bridge to BTC
@@ -364,7 +398,12 @@ function BridgeOut({ bot, view, reload }: { bot: BotView; view: BridgeView; relo
           lead="Bitcoin transfers cannot be undone. Check the address."
           facts={[
             ['You receive', btc(sats)],
-            ['To', <span className="mono">{address.trim()}</span>],
+            [
+              'To',
+              <a className="mono" href={mempoolAddress(address.trim())} target="_blank" rel="noreferrer">
+                {address.trim()}
+              </a>,
+            ],
           ]}
           poolName={bot.pair}
           confirmLabel="Bridge"
@@ -380,18 +419,27 @@ function BridgeOut({ bot, view, reload }: { bot: BotView; view: BridgeView; relo
 
 type Direction = 'in' | 'out';
 
-const trades = (bot: BotView): boolean => bot.baseSymbol === 'sBTC' || bot.quoteSymbol === 'sBTC';
-const holdsStraySbtc = (bot: BotView): boolean => bot.strayTokens.some((token) => token.symbol === 'sBTC' && token.amount > 0);
+/** Per asset: the token a bot holds, and the two directions. */
+const ASSETS: Record<BridgeAsset, { symbol: string; label: string; dirs: [string, string] }> = {
+  btc: { symbol: 'sBTC', label: 'BTC', dirs: ['BTC → sBTC', 'sBTC → BTC'] },
+  usdc: { symbol: 'USDCx', label: 'USDC', dirs: ['USDC → USDCx', 'USDCx → USDC'] },
+};
+
+const trades = (bot: BotView, symbol: string): boolean => bot.baseSymbol === symbol || bot.quoteSymbol === symbol;
+const holdsStray = (bot: BotView, symbol: string): boolean => bot.strayTokens.some((token) => token.symbol === symbol && token.amount > 0);
 
 export function BridgePage({ fleet }: Shared) {
   const [params, setParams] = useSearchParams();
-  // Bots that trade sBTC, plus any other bot holding sBTC sent to it by mistake, which can only bridge out.
-  const bots = fleet.bots.filter((bot) => !bot.preview && bot.address && (trades(bot) || holdsStraySbtc(bot)));
+  const asset: BridgeAsset = params.get('asset') === 'usdc' ? 'usdc' : 'btc';
+  const { symbol, label, dirs } = ASSETS[asset];
+  // Bots that trade the token, plus any other bot holding it by mistake, which can only bridge out.
+  const bots = fleet.bots.filter((bot) => !bot.preview && bot.address && (trades(bot, symbol) || holdsStray(bot, symbol)));
   const asked = params.get('bot') || lastBot();
-  const bot = bots.find((item) => item.id === asked) || bots.find(trades) || bots[0] || null;
-  const [chosen, setDirection] = useState<Direction>(params.get('dir') === 'out' ? 'out' : 'in');
-  const direction: Direction = bot && !trades(bot) ? 'out' : chosen;
-  const { view, error, reload } = useBridge(bot ? bot.id : null, true, direction === 'in');
+  const bot = bots.find((item) => item.id === asked) || bots.find((item) => trades(item, symbol)) || bots[0] || null;
+  const chosen: Direction = params.get('dir') === 'out' ? 'out' : 'in';
+  const direction: Direction = bot && !trades(bot, symbol) ? 'out' : chosen;
+  // Only BTC deposits need an address made and watched; USDC deposits are reported by the page.
+  const { view, error, reload } = useBridge(bot ? bot.id : null, asset === 'btc', direction === 'in');
   const [all, setAll] = useState<AnyTransfer[]>([]);
   useEffect(() => {
     api<{ transfers: AnyTransfer[] }>('/api/bridge')
@@ -399,30 +447,60 @@ export function BridgePage({ fleet }: Shared) {
       .catch(() => undefined);
   }, [view]);
 
+  const set = (patch: Record<string, string | null>): void => {
+    const next = new URLSearchParams(params);
+    for (const [key, value] of Object.entries(patch)) {
+      if (value == null) next.delete(key);
+      else next.set(key, value);
+    }
+    setParams(next, { replace: true });
+  };
+  const pick = (id: string): void => {
+    rememberBot(id);
+    set({ bot: id });
+  };
+  const assetPick = (
+    <div className="asset-pick" role="tablist" aria-label="Asset">
+      {(Object.keys(ASSETS) as BridgeAsset[]).map((key) => (
+        <button key={key} type="button" role="tab" aria-selected={asset === key} className={asset === key ? 'on' : ''} onClick={() => set({ asset: key === 'btc' ? null : key, dir: null })}>
+          {ASSETS[key].label}
+        </button>
+      ))}
+    </div>
+  );
+
   if (!bot) {
     return (
       <div className="page narrow">
-        <h1 className="page-t">Bridge</h1>
+        <div className="bridge-h">
+          <h1 className="page-t">Bridge</h1>
+          {assetPick}
+        </div>
         <Card>
-          <Empty icon="bridge" title="No sBTC bot yet">
-            Bridging moves BTC in and out of an sBTC bot's wallet. <Link to="/new">Create one</Link> to start.
+          <Empty icon="bridge" title={`No ${symbol} bot yet`}>
+            Bridging moves {label} in and out of a bot wallet. <Link to="/new">Create a bot</Link> to start.
           </Empty>
         </Card>
       </div>
     );
   }
 
-  const pick = (id: string): void => {
-    rememberBot(id);
-    setParams({ bot: id }, { replace: true });
-  };
+  const botField = (
+    <div className="field">
+      <span className="field-l">{direction === 'in' ? 'To' : 'From'}</span>
+      <WalletPick bots={bots} bot={bot} view={view} symbol={symbol} onPick={pick} />
+    </div>
+  );
   const simulate = (): void => {
-    void api(`/api/bots/${encodeURIComponent(bot.id)}/bridge-demo-send`, 'POST', {}).then(() => reload());
+    void api(`/api/bots/${encodeURIComponent(bot.id)}/bridge-demo-send`, 'POST', { asset }).then(() => reload());
   };
 
   return (
     <div className="page narrow">
-      <h1 className="page-t">Bridge</h1>
+      <div className="bridge-h">
+        <h1 className="page-t">Bridge</h1>
+        {assetPick}
+      </div>
       {view?.demo ? (
         <div className="banner2 serious center">
           <Icon name="warn" />
@@ -438,32 +516,37 @@ export function BridgePage({ fleet }: Shared) {
       ) : null}
       <Card>
         <div className="dirs" role="tablist">
-          {(
-            [
-              ['in', 'BTC → sBTC'],
-              ['out', 'sBTC → BTC'],
-            ] as const
-          ).map(([value, text]) => (
+          {(['in', 'out'] as const).map((value, i) => (
             <button
               key={value}
               type="button"
               role="tab"
               aria-selected={direction === value}
               className={direction === value ? 'on' : ''}
-              disabled={value === 'in' && !trades(bot)}
-              title={value === 'in' && !trades(bot) ? 'This bot does not trade sBTC, so it can only bridge out.' : undefined}
-              onClick={() => setDirection(value)}
+              disabled={value === 'in' && !trades(bot, symbol)}
+              title={value === 'in' && !trades(bot, symbol) ? `This bot does not trade ${symbol}, so it can only bridge out.` : undefined}
+              onClick={() => set({ dir: value === 'out' ? 'out' : null })}
             >
-              {text}
+              {dirs[i]}
             </button>
           ))}
         </div>
-        <div className="field">
-          <span className="field-l">{direction === 'in' ? 'To' : 'From'}</span>
-          <WalletPick bots={bots} bot={bot} view={view} onPick={pick} />
-        </div>
+        {direction === 'in' && view ? null : botField}
         {error ? <p className="form-err">{error}</p> : null}
-        {!view ? <span className="spinner" /> : direction === 'in' ? <DepositPanel view={view} /> : <BridgeOut bot={bot} view={view} reload={reload} />}
+        {!view ? (
+          <span className="spinner" />
+        ) : asset === 'usdc' ? (
+          direction === 'in' ? (
+            // From the user's Ethereum wallet comes first, so the bot goes below it.
+            <UsdcIn bot={bot} view={view} reload={reload} target={botField} />
+          ) : (
+            <UsdcOut key={bot.id} bot={bot} view={view} reload={reload} />
+          )
+        ) : direction === 'in' ? (
+          <DepositPanel view={view} target={botField} />
+        ) : (
+          <BridgeOut key={bot.id} bot={bot} view={view} reload={reload} />
+        )}
       </Card>
       <Card title="Activity">
         <Activity transfers={all} bots={fleet.bots} />

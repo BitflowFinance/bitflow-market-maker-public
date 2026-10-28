@@ -74,10 +74,13 @@ Each bot's key is `SIGNER_KEY` in its `.env.<bot>` file. Wallets the page create
 - **`.mm-wallet` lost, env files intact:** the bots keep running on their own keys. The page will not make another app wallet until you restore `.mm-wallet` from your backup, and it shows each bot's own key to back up instead of a phrase.
 - **Both lost:** the funds are gone. Back up the phrase when the page asks.
 
-## 7. sBTC bridge transfer stuck
+## 7. Bridge transfer stuck
 
 Transfers and the deposit address's scripts are in `data/bridge.<bot>.json`. Do not delete it while a transfer is open.
 
 - **BTC sent, nothing on the Bridge page:** the page only notices deposits while `npm run ui` is running. Start it; it keeps watching each deposit address for 30 days and registers the BTC with the signers when it finds it.
 - **Deposit failed:** the signers did not sweep it, so the BTC is still at the deposit address. After 950 Bitcoin blocks (about a week) it can be reclaimed with the bot's key, using the `reclaimScript` in the file (the `sbtc` package's `buildSbtcReclaimTx`). The page does not build this yet.
 - **Withdrawal failed after a Stacks tx:** check the transaction on the explorer before trying again. If it confirmed, the signers either send the BTC or return the sBTC to the bot wallet.
+- **USDC deposit stuck on Confirming:** the page follows the Ethereum hash it was given. If you sped the transaction up in your wallet, the hash changed; the transfer still completes once the USDCx mint shows up, and is marked failed after 24 hours if nothing arrives. Check the hash on Etherscan.
+- **USDC deposit failed with "different Stacks address":** that transaction named another recipient, so the USDCx went there, not to this bot.
+- **USDCx withdrawal stuck on Sending USDC:** Circle pays out in about an hour, by minting USDC to the address less 2.00 USDC. The console looks for that payout over the last ~4000 Ethereum blocks (about 13 hours); if the console was off longer than that, check the address on Etherscan.

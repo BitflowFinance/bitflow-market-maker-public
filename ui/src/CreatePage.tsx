@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { BotView, PhraseAccount, ProfileInfo, Strategy, WalletInfo, api, botPath } from './api';
-import { DepositPanel, useBridge } from './BridgePage';
+import { BotTo, DepositPanel, useBridge } from './BridgePage';
+import { UsdcIn } from './UsdcBridge';
 import type { Shared } from './App';
 import { addressInput, hexInput, poolName, tok } from './format';
 import { PoolList, usePoolCatalog } from './PoolList';
@@ -127,10 +128,12 @@ export function CreatePage({ fleet, reload }: Shared) {
   }, [catalog, strategy]);
   const chosen = catalog?.pools.find((item) => item.poolId === contract) || null;
   const contractId = contract || pool?.poolId || '';
-  // sBTC pairs can also be funded with plain BTC through the sBTC bridge.
+  // sBTC pairs can also be funded with plain BTC through the sBTC bridge, and USDCx pairs with USDC from Ethereum.
   const canBridge = Boolean(created?.address && pool && (pool.baseSymbol === 'sBTC' || pool.quoteSymbol === 'sBTC'));
-  const [fundWith, setFundWith] = useState<'stacks' | 'btc'>('stacks');
-  const { view: bridgeView, error: bridgeError } = useBridge(canBridge && fundWith === 'btc' && step === fundStep && created ? created.id : null, true);
+  const canBridgeUsdc = Boolean(created?.address && pool && (pool.baseSymbol === 'USDCx' || pool.quoteSymbol === 'USDCx'));
+  const [fundWith, setFundWith] = useState<'stacks' | 'btc' | 'usdc'>('stacks');
+  const bridging = (fundWith === 'btc' && canBridge) || (fundWith === 'usdc' && canBridgeUsdc);
+  const { view: bridgeView, error: bridgeError, reload: reloadBridge } = useBridge(bridging && step === fundStep && created ? created.id : null, fundWith === 'btc');
 
   const create = async () => {
     if (!pool) return;
@@ -438,43 +441,7 @@ export function CreatePage({ fleet, reload }: Shared) {
         <>
           <Card title="Fund the wallet">
             {created?.startError ? <p className="form-err">{created.startError}</p> : null}
-            <p className="muted">Send tokens to this bot's wallet. Any amount works; the table suggests a start that lets the bot place liquidity on both sides.</p>
-            {canBridge ? (
-              <Seg
-                value={fundWith}
-                onChange={setFundWith}
-                options={[
-                  { value: 'stacks', label: 'Send from a Stacks wallet' },
-                  { value: 'btc', label: 'Send BTC (arrives as sBTC)' },
-                ]}
-              />
-            ) : null}
-            {canBridge && fundWith === 'btc' ? (
-              bridgeView ? (
-                <>
-                  {bridgeError ? <p className="form-err">{bridgeError}</p> : null}
-                  <DepositPanel view={bridgeView} />
-                  <p className="note">
-                    {pool.quoteSymbol} and STX for fees still come from a Stacks wallet.
-                  </p>
-                </>
-              ) : bridgeError ? (
-                <p className="form-err">{bridgeError}</p>
-              ) : (
-                <span className="spinner" />
-              )
-            ) : created?.address ? (
-              <div className="fundaddr">
-                <QrCode text={created.address} />
-                <div className="addrbox">
-                  <div className="addrbox-k">Bot wallet address</div>
-                  <div className="addrbox-v mono">{created.address}</div>
-                  <CopyButton text={created.address} label="Copy" />
-                </div>
-              </div>
-            ) : (
-              <p className="muted">Loading address…</p>
-            )}
+            <p className="muted">Any amount works; these amounts let the bot place liquidity on both sides.</p>
             <table className="tbl fund">
               <thead>
                 <tr>
@@ -488,25 +455,62 @@ export function CreatePage({ fleet, reload }: Shared) {
                 <FundRow symbol={pool.baseSymbol} suggested={pool.suggest.base} have={created ? (created.liveWallet ? created.liveWallet.base : created.walletBase) : null} />
                 <FundRow symbol={pool.quoteSymbol} suggested={pool.suggest.quote} have={created ? (created.liveWallet ? created.liveWallet.quote : created.walletQuote) : null} />
                 {pool.baseSymbol !== 'STX' ? (
-                  <tr>
-                    <td>STX (fees)</td>
-                    <td className="n">{pool.suggest.gas}</td>
-                    <td className="n muted">—</td>
-                    <td />
-                  </tr>
+                  <FundRow
+                    symbol="STX"
+                    label="STX (fees)"
+                    suggested={String(parseFloat(pool.suggest.gas))}
+                    have={created ? (created.liveWallet ? created.liveWallet.stx : created.walletStx) : null}
+                  />
                 ) : null}
               </tbody>
             </table>
             {pool.baseSymbol === 'STX' ? <p className="note">{pool.suggest.gas}</p> : null}
-            {pool.quoteSymbol === 'USDCx' ? (
-              <p className="note">
-                Have USDC on Ethereum? Bridge it at{' '}
-                <a href="https://bridge.stacks.co/usdc/eth/stx" target="_blank" rel="noreferrer">
-                  bridge.stacks.co <Icon name="external" size={11} />
-                </a>{' '}
-                and send the USDCx to the bot's address.
-              </p>
-            ) : null}
+            <div className="fund-how">
+              <h2 className="sub-h">How to fund</h2>
+              {canBridge || canBridgeUsdc ? (
+                <div className="ways" role="radiogroup" aria-label="How to fund">
+                  {[
+                    { value: 'stacks' as const, title: 'Stacks', sub: pool.baseSymbol === 'STX' ? `STX and ${pool.quoteSymbol}` : `${pool.baseSymbol}, ${pool.quoteSymbol} and STX` },
+                    ...(canBridge ? [{ value: 'btc' as const, title: 'Bitcoin', sub: 'BTC arrives as sBTC' }] : []),
+                    ...(canBridgeUsdc ? [{ value: 'usdc' as const, title: 'Ethereum', sub: 'USDC arrives as USDCx' }] : []),
+                  ].map((way) => (
+                    <button key={way.value} type="button" role="radio" aria-checked={fundWith === way.value} className={`choice way${fundWith === way.value ? ' on' : ''}`} onClick={() => setFundWith(way.value)}>
+                      <Icon name={way.value === 'stacks' ? 'wallet' : 'bridge'} size={18} />
+                      <span className="choice-body">
+                        <span className="choice-t">{way.title}</span>
+                        <span className="choice-s">{way.sub}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {bridging ? (
+                bridgeView && created ? (
+                  <>
+                    {bridgeError ? <p className="form-err">{bridgeError}</p> : null}
+                    {fundWith === 'btc' ? (
+                      <DepositPanel view={bridgeView} target={<BotTo bot={created} view={bridgeView} symbol="sBTC" />} />
+                    ) : (
+                      <UsdcIn bot={created} view={bridgeView} reload={reloadBridge} target={<BotTo bot={created} view={bridgeView} symbol="USDCx" />} />
+                    )}
+                  </>
+                ) : bridgeError ? (
+                  <p className="form-err">{bridgeError}</p>
+                ) : (
+                  <span className="spinner" />
+                )
+              ) : created?.address ? (
+                <div className="fundaddr">
+                  <QrCode text={created.address} />
+                  <div className="addrbox">
+                    <div className="addrbox-v mono">{created.address}</div>
+                    <CopyButton text={created.address} label="Copy" />
+                  </div>
+                </div>
+              ) : (
+                <p className="muted">Loading address…</p>
+              )}
+            </div>
           </Card>
           <div className="row-between">
             <span className="spacer" />
@@ -521,13 +525,14 @@ export function CreatePage({ fleet, reload }: Shared) {
   );
 }
 
-function FundRow({ symbol, suggested, have }: { symbol: string; suggested: string; have: number | null }) {
+function FundRow({ symbol, label, suggested, have }: { symbol: string; label?: string; suggested: string; have: number | null }) {
   const enough = have != null && have >= Number(suggested);
   return (
     <tr>
-      <td>{symbol}</td>
+      <td>{label || symbol}</td>
       <td className="n">{tok(Number(suggested), symbol)}</td>
-      <td className="n">{have == null ? <span className="muted">—</span> : tok(have, symbol)}</td>
+      {/* Null until the first chain read lands; the fleet poll retries it every few seconds. */}
+      <td className="n">{have == null ? <span className="muted">Checking…</span> : tok(have, symbol)}</td>
       <td>{enough ? <span className="tag t-good">Enough</span> : have != null ? <span className="tag t-unknown">Short</span> : null}</td>
     </tr>
   );

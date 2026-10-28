@@ -35,12 +35,12 @@ Agent calls go to `http://127.0.0.1:4173` with `content-type: application/json`.
 - `GET /api/fleet` answers how the bots are doing. Each bot carries `insights` (time in range, trades and gas over 24h and all time), `market` (pool vs market price and the gap against the halt limit), `inventory`, `curve`, and `walletStx` / `gasTxLeft`.
 - `GET /api/pools?profile=sbtc|stx` ranks the pair's pools (`recommended`, and `reasons` for each skipped one). `POST /api/bots/:id/pool` with `poolId`, `acknowledged: true`, and the exact `poolName` changes pools; it runs in the background (`poolSwitch` on the bot), withdraws first when live, and changes nothing unless the old pool is confirmed empty. Only change pools when the user asks.
 - `GET /api/bots/:id/history?range=1d|7d|all` gives chart points; `GET /api/bots/:id/decisions.csv` gives every recorded check.
-- `POST /api/bots/:id/pause`, `/resume`, `/start`, `/stop` control the process. Pause is the kill switch and does not withdraw. Stop does not withdraw.
+- `POST /api/bots/:id/pause`, `/resume`, `/start`, `/stop` control the process. Pause is the kill switch and does not withdraw. Stop does not withdraw. `POST /api/pause-all` (the header's Pause all) pauses every running bot and leaves stopped ones alone.
 - `POST /api/bots/:id/manual` is a swap, add, or withdraw. Dry run returns 409. Withdraw returns 409 until the bot is paused. Body must include `acknowledged: true` and `poolName` equal to `sBTC / USDCx` or `STX / USDCx`.
 - `POST /api/bots/:id/settings` writes the env file and restarts. `SIGNER_KEY` is rejected. Setting `EXECUTION_MODE` to `live` also requires `confirmLive: true` and the exact `poolName`.
 - `POST /api/bots/:id/cash-out` pauses and stops the bot, withdraws everything, and sends all tokens and STX to the saved payout address. It works in dry run. Body must include `acknowledged: true` and the exact `poolName`; it returns 409 `no_payout` until the user saves an address. It runs in the background: poll `GET /api/bots/:id/cash-out` until `status` is `done` or `failed`. A `failed` run is safe to repeat. Only cash out when the user asks in chat.
 - `key-backup`, `key-saved`, and `payout` answer only the page (403 `page_only` otherwise). Do not try to get around that: never read, print, or repeat `SIGNER_KEY`, and never set or suggest a payout address the user did not type themselves. Send the user to the Wallet tab instead.
-- `GET /api/bridge` lists every bot's transfers. `GET /api/bots/:id/bridge` gives the bot's sBTC deposit address, withdrawal limits, and transfers. `POST /api/bots/:id/bridge-deposit` makes the deposit address (nothing leaves the wallet; the console finds and registers deposits itself). `bridge-withdraw` sends sBTC to a Bitcoin address, so it answers only the page; send the user to the Bridge page.
+- `GET /api/bridge` lists every bot's transfers. `GET /api/bots/:id/bridge` gives the bot's sBTC deposit address, withdrawal limits, and transfers. `POST /api/bots/:id/bridge-deposit` makes the deposit address (nothing leaves the wallet; the console finds and registers deposits itself). `bridge-usdc-deposit` records a USDC deposit the user sent from their Ethereum wallet (the receipt is checked against the bot address before it counts). `bridge-withdraw` (sBTC to a Bitcoin address) and `bridge-usdc-withdraw` (USDCx to an Ethereum address) send funds out, so they answer only the page; send the user to the Bridge page.
 - Preview ids look like `preview-sbtc`.
 
 New bots are created with `POST /api/bots` and always start in dry run. Importing a key writes it to `.env.<pool>` and the JSON response must not contain it.
@@ -114,7 +114,9 @@ logInfo('[tag] key="value"');
 - `src/payout.ts`     - Payout address / memo checks (no CONFIG, shared with the console)
 - `src/sbtc.ts`       - sBTC peg constants + Bitcoin address encoding (no CONFIG, shared)
 - `src/sbtcWithdraw.ts` - `--sbtc-withdraw`: one sBTC -> BTC withdrawal request
-- `src/console/`      - Local page helper (`npm run ui`): API, bot processes, env files, sBTC bridge (`bridge.ts`)
+- `src/usdcx.ts`      - USDCx/xReserve constants + Ethereum/Stacks recipient encodings (no CONFIG, shared)
+- `src/usdcxWithdraw.ts` - `--usdcx-withdraw`: one `usdcx-v1.burn` to an Ethereum address
+- `src/console/`      - Local page helper (`npm run ui`): API, bot processes, env files, sBTC + USDCx bridge (`bridge.ts`, `usdcLive.ts`)
 - `src/plan.ts`       - Execute the rebalance plan (withdraw/swap/add)
 - `src/primitives.ts` - Market-making actions (swap/add/withdraw)
 - `src/swap.ts`       - DLMM swap router calls + output estimate

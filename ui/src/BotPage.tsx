@@ -4,7 +4,7 @@ import { BotView, DecisionRow, HistoryRange, LogLine, ReasonKind, api, botFromPa
 import type { Shared } from './App';
 import { BinChart, ValueChart } from './charts';
 import { ago, clock, countdown, decimalInput, pct, placesOf, poolName, price, shortAddr, stx, tok, usd } from './format';
-import { Card, CopyButton, Dot, Empty, Icon, Modal, ModeBadge, RiskConfirm, Seg, Stat, downloadFile, useToast } from './ui';
+import { BalanceFill, Card, SHORT_LIST, CopyButton, Dot, Empty, Icon, Modal, ModeBadge, RiskConfirm, Seg, Stat, downloadFile, useToast } from './ui';
 import { KeysCard } from './KeysCard';
 import { BotTitle, StrategyCard } from './StrategyCard';
 import { PoolCard } from './PoolCard';
@@ -616,7 +616,6 @@ const runsOf = (rows: DecisionRow[]): DecisionRun[] => {
   return out;
 };
 
-const SHORT_LIST = 10;
 
 function Activity({ bot }: { bot: BotView }) {
   const [filter, setFilter] = useState<'all' | 'changes'>('all');
@@ -907,7 +906,7 @@ const BOT_DEFAULTS: Record<string, string> = {
 const GROUPS: Array<{ title: string; fields: FieldDef[] }> = [
   {
     title: 'Timing',
-    fields: [{ key: 'TICK_INTERVAL_MS', label: 'Check every', help: '10 seconds to 1 hour. Shorter reacts faster but pays more fees.', unit: 'seconds', scale: 1000 }],
+    fields: [{ key: 'TICK_INTERVAL_MS', label: 'Check every', help: '10 seconds to 1 hour. A check is free; only rebalances pay fees. Shorter reacts sooner, so in a choppy market it may rebalance more often.', unit: 'seconds', scale: 1000 }],
   },
   {
     title: 'Curve shape',
@@ -1328,6 +1327,14 @@ function Manual({ bot, reload }: { bot: BotView; reload: () => Promise<void> }) 
   );
 }
 
+// STX also pays the fee, so filling with it leaves the bot's gas reserve behind.
+const fillOf = (bot: BotView, have: number | null, sym: string, set: (value: string) => void): (() => void) | null => {
+  const reserve = sym === 'STX' ? Number(bot.settings.STX_GAS_RESERVE_USTX || '5000000') / 1e6 : 0;
+  const value = have == null ? 0 : have - reserve;
+  if (value <= 0) return null;
+  return () => set(decimalInput(value.toFixed(placesOf(sym)).replace(/\.?0+$/, ''), placesOf(sym)));
+};
+
 function ManualInputs(props: {
   kind: ManualKind;
   bot: BotView;
@@ -1356,36 +1363,48 @@ function ManualInputs(props: {
             { value: 'quote', label: `Sell ${bot.quoteSymbol}` },
           ]}
         />
-        <label className="field">
-          <span className="field-l">Amount</span>
+        <div className="field">
+          <span className="field-row">
+            <span className="field-l">Amount</span>
+            <span className="field-aside">
+              <BalanceFill text={tok(have, sym)} onFill={fillOf(bot, have, sym, props.setAmount)} />
+            </span>
+          </span>
           <span className="in-unit">
             <input className="in" inputMode="decimal" value={props.amount} onChange={(e) => props.setAmount(decimalInput(e.target.value, placesOf(sym)))} placeholder="0.0" />
             <span className="unit">{sym}</span>
           </span>
-          <span className="sf-h">Wallet: {tok(have, sym)}</span>
-        </label>
+        </div>
       </div>
     );
   }
   if (kind === 'add') {
     return (
       <div className="minputs two">
-        <label className="field">
-          <span className="field-l">{bot.baseSymbol}</span>
+        <div className="field">
+          <span className="field-row">
+            <span className="field-l">{bot.baseSymbol}</span>
+            <span className="field-aside">
+              <BalanceFill text={tok(bot.walletBase, bot.baseSymbol)} onFill={fillOf(bot, bot.walletBase, bot.baseSymbol, props.setXAmount)} />
+            </span>
+          </span>
           <span className="in-unit">
             <input className="in" inputMode="decimal" value={props.xAmount} onChange={(e) => props.setXAmount(decimalInput(e.target.value, placesOf(bot.baseSymbol)))} placeholder="0" />
             <span className="unit">{bot.baseSymbol}</span>
           </span>
-          <span className="sf-h">Wallet: {tok(bot.walletBase, bot.baseSymbol)}</span>
-        </label>
-        <label className="field">
-          <span className="field-l">{bot.quoteSymbol}</span>
+        </div>
+        <div className="field">
+          <span className="field-row">
+            <span className="field-l">{bot.quoteSymbol}</span>
+            <span className="field-aside">
+              <BalanceFill text={tok(bot.walletQuote, bot.quoteSymbol)} onFill={fillOf(bot, bot.walletQuote, bot.quoteSymbol, props.setYAmount)} />
+            </span>
+          </span>
           <span className="in-unit">
             <input className="in" inputMode="decimal" value={props.yAmount} onChange={(e) => props.setYAmount(decimalInput(e.target.value, placesOf(bot.quoteSymbol)))} placeholder="0" />
             <span className="unit">{bot.quoteSymbol}</span>
           </span>
-          <span className="sf-h">Wallet: {tok(bot.walletQuote, bot.quoteSymbol)}</span>
-        </label>
+        </div>
       </div>
     );
   }

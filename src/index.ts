@@ -10,6 +10,7 @@ import { initMetrics, recordTick } from './metrics';
 import { runTick } from './mm';
 import { runSbtcWithdraw } from './sbtcWithdraw';
 import { SwapSide, prepareSwap } from './swap';
+import { runUsdcxWithdraw } from './usdcxWithdraw';
 import {
   assertSignerKeyMatchesAddress,
   preflight,
@@ -228,6 +229,11 @@ const main = async (): Promise<void> => {
   }
   if (process.argv.includes('--sbtc-withdraw')) {
     const ok = await runSbtcWithdraw(getArg('--amount') || '', getArg('--to') || '', getArg('--max-fee') || '');
+    if (!ok) process.exitCode = 1;
+    return;
+  }
+  if (process.argv.includes('--usdcx-withdraw')) {
+    const ok = await runUsdcxWithdraw(getArg('--amount') || '', getArg('--to') || '');
     if (!ok) process.exitCode = 1;
     return;
   }

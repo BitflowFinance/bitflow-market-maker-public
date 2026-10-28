@@ -7,7 +7,7 @@ import { CreatePage } from './CreatePage';
 import { HomePage } from './HomePage';
 import { NotifyButton, useNeedAlerts, useNotifyPref } from './alerts';
 import { ago } from './format';
-import { Dot, Icon, ToastHost, useNow } from './ui';
+import { Dot, Icon, ToastHost, useNow, useToast } from './ui';
 
 type ThemeMode = 'light' | 'dark';
 
@@ -78,6 +78,44 @@ export function App() {
         )}
       </ToastHost>
     </div>
+  );
+}
+
+/**
+ * One click halts every running bot: each stops placing new trades, its
+ * liquidity stays in the pool, and it resumes from its own page. Stopped bots
+ * are left as they are.
+ */
+function PauseAll({ bots, reload }: { bots: BotView[]; reload: () => Promise<void> }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const active = bots.filter((bot) => bot.running && !bot.paused);
+  if (!active.length) return null;
+  const pauseAll = async () => {
+    setBusy(true);
+    try {
+      const res = await api<{ paused: string[]; failed: string[] }>('/api/pause-all', 'POST', {});
+      const paused = `Paused ${res.paused.length} bot${res.paused.length === 1 ? '' : 's'}.`;
+      if (res.failed.length) toast('bad', `${paused} Could not pause ${res.failed.join(', ')}.`);
+      else toast('good', `${paused} Liquidity stays in the pool.`);
+      await reload();
+    } catch (err) {
+      toast('bad', err instanceof Error ? err.message : 'Could not pause the bots.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      className="hbtn"
+      disabled={busy}
+      onClick={() => void pauseAll()}
+      title={`Pause ${active.length === 1 ? 'the running bot' : `all ${active.length} running bots`}. Liquidity stays in the pool; resume each from its page.`}
+    >
+      <Icon name="pause" size={14} />
+      <span className="hbtn-t">{busy ? 'Pausing…' : 'Pause all'}</span>
+    </button>
   );
 }
 
@@ -174,6 +212,7 @@ function Shell({
             </span>
           </span>
         ) : null}
+        <PauseAll bots={real} reload={reload} />
         <NotifyButton on={notify} setOn={setNotify} />
         <button type="button" className="ibtn" onClick={toggle} aria-label={mode === 'dark' ? 'Use light theme' : 'Use dark theme'} title="Theme">
           <Icon name={mode === 'dark' ? 'sun' : 'moon'} size={16} />

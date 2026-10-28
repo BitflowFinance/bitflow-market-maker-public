@@ -1,5 +1,6 @@
 import { SbtcApiClientMainnet } from 'sbtc';
 import { BridgeClient, BridgeLimits, EmilyRecord } from './bridge';
+import { liveUsdcClient } from './usdcLive';
 
 const EMILY = 'https://sbtc-emily.com';
 const MEMPOOL = 'https://mempool.space/api';
@@ -36,7 +37,7 @@ const recordOf = (raw: EmilyRaw): EmilyRecord => ({
   requestId: raw.requestId ?? null,
 });
 
-/** Official sBTC: signers' key from the chain, intake and status through Emily, Bitcoin reads through mempool.space. */
+/** Official sBTC: signers' key from the chain, intake and status through Emily, Bitcoin reads through mempool.space. USDCx reads come from usdcLive.ts. */
 export const liveBridgeClient = (): BridgeClient => {
   const sbtc = new SbtcApiClientMainnet();
   let signers: { at: number; key: string } | null = null;
@@ -99,5 +100,6 @@ export const liveBridgeClient = (): BridgeClient => {
       };
       return limits.value;
     },
+    usdc: liveUsdcClient(),
   };
 };

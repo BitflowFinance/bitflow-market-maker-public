@@ -152,6 +152,7 @@ export const handleConsole = async (store: ConsoleStore, req: ConsoleRequest, no
       }),
     };
   }
+  if (method === 'POST' && path === '/api/pause-all') return { status: 200, body: await store.pauseAll(nowMs) };
   if (method === 'POST' && botAction) {
     const id = decodeURIComponent(botAction[1]);
     const action = botAction[2];
@@ -208,7 +209,28 @@ export const handleConsole = async (store: ConsoleStore, req: ConsoleRequest, no
       };
     }
     if (action === 'bridge-deposit') return { status: 200, body: await store.bridgeDeposit(id) };
-    if (action === 'bridge-demo-send') return { status: 200, body: await store.bridgeDemoSend(id) };
+    if (action === 'bridge-demo-send') return { status: 200, body: await store.bridgeDemoSend(id, typeof body.asset === 'string' ? body.asset : 'btc') };
+    if (action === 'bridge-usdc-deposit') {
+      return {
+        status: 200,
+        body: await store.bridgeUsdcDeposit(id, {
+          ethTxid: typeof body.ethTxid === 'string' ? body.ethTxid : '',
+          amount: typeof body.amount === 'string' ? body.amount : '',
+        }),
+      };
+    }
+    if (action === 'bridge-usdc-withdraw') {
+      requirePage(req);
+      return {
+        status: 200,
+        body: await store.bridgeUsdcWithdraw(id, {
+          amount: typeof body.amount === 'string' ? body.amount : '',
+          ethAddress: typeof body.ethAddress === 'string' ? body.ethAddress : '',
+          acknowledged: body.acknowledged === true,
+          poolName: typeof body.poolName === 'string' ? body.poolName : '',
+        }),
+      };
+    }
     if (action === 'bridge-withdraw') {
       // Sends funds to an address typed here, so it answers only the page, like the payout address.
       requirePage(req);

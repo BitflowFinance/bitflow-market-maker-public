@@ -2,7 +2,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
-import { BridgeClient, EmilyRecord, btcToSats, reclaimKeyOf, withdrawFeeOf, xOnlyKey } from '../src/console/bridge';
+import { BridgeClient, EmilyRecord, EthDeposit, btcToSats, reclaimKeyOf, withdrawFeeOf, xOnlyKey } from '../src/console/bridge';
+import { depositOfLogs } from '../src/console/usdcLive';
+import { ethAddressOf, ethRecipientOf, stacksRecipientOf, usdcToMicro } from '../src/usdcx';
 import { btcRecipientOf } from '../src/sbtc';
 import { demoBridge } from '../src/console/bridgeDemo';
 import { bookOf, humanReason, parseLogLine, validateSettings } from '../src/console/model';
@@ -61,6 +63,9 @@ const fakeBridge = () => {
     withdrawals: new Map<string, EmilyRecord>(),
     registered: [] as string[],
     rate: 2,
+    ethReceipts: new Map<string, EthDeposit>(),
+    mints: [] as Array<{ address: string; amount: number; txid: string }>,
+    payouts: [] as Array<{ address: string; value: number; ethTxid: string }>,
   };
   const client: BridgeClient = {
     signersKey: () => Promise.resolve(state.signers),
@@ -76,6 +81,15 @@ const fakeBridge = () => {
     withdrawal: (_sender, stacksTxid) => Promise.resolve(state.withdrawals.get(stacksTxid) || null),
     feeRate: () => Promise.resolve(state.rate),
     limits: () => Promise.resolve({ minDepositSats: 10_000, maxWithdrawSats: 5_000_000_000 }),
+    usdc: {
+      ethHead: () => Promise.resolve(21_000_000),
+      deposit: (ethTxid) => Promise.resolve(state.ethReceipts.get(ethTxid) || null),
+      findMint: (address, amount, _since, skip) =>
+        Promise.resolve(state.mints.find((m) => m.address === address && m.amount === amount && !skip.includes(m.txid))?.txid || null),
+      findPayout: (address, _from, min, max, skip) =>
+        Promise.resolve(state.payouts.find((p) => p.address === address && p.value >= min && p.value <= max && !skip.includes(p.ethTxid)) || null),
+      minWithdraw: () => Promise.resolve(4_800_000),
+    },
   };
   return { client, state };
 };
@@ -133,6 +147,21 @@ describe('local console', () => {
     expect(preview?.address).toBeNull();
     expect(preview?.keySet).toBe(false);
     expect(preview?.walletBase).toBeGreaterThan(0);
+  });
+
+  it('pauses every running bot at once and leaves stopped ones alone', async () => {
+    const { call } = boot();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: createWallet().key });
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: createWallet().key });
+    await call('POST', '/api/bots/sbtc/resume');
+    await call('POST', '/api/bots/stx/stop');
+    const bot = async (id: string) => (await call('GET', `/api/bots/${id}`)).body as { running: boolean; paused: boolean };
+    expect(await bot('sbtc')).toMatchObject({ running: true, paused: false });
+
+    expect((await call('POST', '/api/pause-all')).body).toEqual({ paused: ['sbtc'], failed: [] });
+    expect(await bot('sbtc')).toMatchObject({ paused: true });
+    expect(await bot('stx')).toMatchObject({ running: false, paused: false });
+    expect((await call('POST', '/api/pause-all')).body).toEqual({ paused: [], failed: [] });
   });
 
   it('keeps preview balances when paused', async () => {
@@ -302,9 +331,9 @@ describe('local console', () => {
     await store.syncBridges(new Date());
     await store.syncBridges(new Date());
     expect(bridge.state.registered).toEqual([`${txid}:1`]);
-    let transfers = ((await call('GET', '/api/bots/sbtc/bridge')).body as { transfers: Array<{ kind: string; status: string; amountSats: number; stacksTxid: string | null }> }).transfers;
+    let transfers = ((await call('GET', '/api/bots/sbtc/bridge')).body as { transfers: Array<{ kind: string; asset: string; status: string; amount: number; stacksTxid: string | null }> }).transfers;
     expect(transfers).toHaveLength(1);
-    expect(transfers[0]).toMatchObject({ kind: 'deposit', status: 'processing', amountSats: 250_000 });
+    expect(transfers[0]).toMatchObject({ kind: 'deposit', asset: 'btc', status: 'processing', amount: 250_000 });
 
     bridge.state.emily.set(`${txid}:1`, { status: 'confirmed', message: '', btcTxid: 'cd'.repeat(32), stacksTxid: '0x01', requestId: null });
     await store.syncBridges(new Date());
@@ -361,6 +390,122 @@ describe('local console', () => {
     await store.syncBridges(new Date());
     view = await store.bridgeView('sbtc');
     expect(view.transfers[0]).toMatchObject({ status: 'done', btcTxid: 'ef'.repeat(32), requestId: 7 });
+  });
+
+  it('follows a USDC deposit from the Ethereum receipt to the Stacks mint', async () => {
+    const { call, store, bridge } = boot();
+    const wallet = createWallet();
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: wallet.key });
+    const view = (await call('GET', '/api/bots/stx/bridge')).body as { stacksAddress: string; usdc: { recipient: string } };
+    expect(view.usdc.recipient).toBe(stacksRecipientOf(view.stacksAddress));
+    const report = (ethTxid: string, amount = '25') => call('POST', '/api/bots/stx/bridge-usdc-deposit', { ethTxid, amount });
+    expect((await report('0x1234')).status).toBe(400);
+    expect((await report(`0x${'aa'.repeat(32)}`, '1.1234567')).status).toBe(400);
+
+    const ours = `0x${'aa'.repeat(32)}`;
+    const elsewhere = `0x${'bb'.repeat(32)}`;
+    const reverted = `0x${'cc'.repeat(32)}`;
+    await report(ours);
+    await report(ours);
+    await report(elsewhere);
+    await report(reverted);
+    await store.syncBridges(new Date());
+    type T = { id: string; status: string; amount: number; stacksTxid: string | null; message: string };
+    const list = async () => ((await call('GET', '/api/bots/stx/bridge')).body as { transfers: T[] }).transfers;
+    const byTx = async (tx: string) => (await list()).find((t) => t.id === `eth-${tx}`) as T;
+    expect(await list()).toHaveLength(3);
+    expect((await byTx(ours)).status).toBe('sent');
+
+    bridge.state.ethReceipts.set(ours, { ok: true, recipient: view.usdc.recipient, domain: 10003, value: 24_500_000 });
+    bridge.state.ethReceipts.set(elsewhere, { ok: true, recipient: stacksRecipientOf('SPWVCRSE70G9W9JQYHHHW23R2A695RSM5HAJHW0H'), domain: 10003, value: 25_000_000 });
+    bridge.state.ethReceipts.set(reverted, { ok: false });
+    await store.syncBridges(new Date());
+    // The receipt's amount wins over what the page reported.
+    expect(await byTx(ours)).toMatchObject({ status: 'processing', amount: 24_500_000 });
+    expect((await byTx(elsewhere)).status).toBe('failed');
+    expect((await byTx(elsewhere)).message).toContain('different Stacks address');
+    expect((await byTx(reverted)).status).toBe('failed');
+
+    bridge.state.mints.push({ address: view.stacksAddress, amount: 24_500_000, txid: '0xmint' });
+    await store.syncBridges(new Date());
+    expect(await byTx(ours)).toMatchObject({ status: 'done', stacksTxid: '0xmint' });
+  });
+
+  it('withdraws USDCx to Ethereum only from the page, and follows the payout', async () => {
+    const { call, store, host, bridge } = boot();
+    await call('POST', '/api/bots', { profile: 'stx', wallet: 'import', signerKey: createWallet().key });
+    const to = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed';
+    const body = { amount: '25', ethAddress: to.toLowerCase(), acknowledged: true, poolName: 'STX / USDCx' };
+    const err = async (payload: unknown) => ((await call('POST', '/api/bots/stx/bridge-usdc-withdraw', payload, PAGE)).body as { error: string }).error;
+
+    expect((await call('POST', '/api/bots/stx/bridge-usdc-withdraw', body)).status).toBe(403);
+    expect(await err({ ...body, ethAddress: '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeD' })).toBe('eth_address');
+    expect(await err({ ...body, ethAddress: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq' })).toBe('eth_address');
+    expect(await err({ ...body, amount: '4' })).toBe('amount');
+    expect(await err({ ...body, poolName: 'nope' })).toBe('confirm');
+    await call('POST', '/api/bots/stx/resume');
+    expect(await err(body)).toBe('pause_first');
+    await call('POST', '/api/bots/stx/pause');
+
+    host.manualOutput = '[usdcx] step=burn tx=0xb0b ok=true status="success"\n[usdcx] done tx=0xb0b\n';
+    expect((await call('POST', '/api/bots/stx/bridge-usdc-withdraw', body, PAGE)).status).toBe(200);
+    // The checksum form goes to the runner, whatever case was typed.
+    expect(host.manual[host.manual.length - 1]).toEqual(['--usdcx-withdraw', '--amount', '25000000', '--to', to]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    let view = await store.bridgeView('stx');
+    expect(view.transfers[0]).toMatchObject({ kind: 'withdraw', asset: 'usdc', status: 'processing', stacksTxid: '0xb0b', ethAddress: to, ethBlock: 21_000_000 });
+
+    // A payout far below the burn is someone else's.
+    bridge.state.payouts.push({ address: to, value: 5_000_000, ethTxid: '0xother' });
+    await store.syncBridges(new Date());
+    expect((await store.bridgeView('stx')).transfers[0].status).toBe('processing');
+    bridge.state.payouts.push({ address: to, value: 23_000_000, ethTxid: '0xpay' });
+    await store.syncBridges(new Date());
+    view = await store.bridgeView('stx');
+    expect(view.transfers[0]).toMatchObject({ status: 'done', ethTxid: '0xpay', received: 23_000_000 });
+  });
+
+  it('reads files written before USDC bridging', async () => {
+    const { call, root, store } = boot();
+    await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'import', signerKey: createWallet().key });
+    const old = { addresses: [], transfers: [{ id: 'dep-x-0', kind: 'deposit', status: 'done', amountSats: 70_000, message: '', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', btcTxid: 'x', stacksTxid: null }] };
+    writeFileSync(join(root, 'data', 'bridge.sbtc.json'), JSON.stringify(old));
+    const view = await store.bridgeView('sbtc');
+    expect(view.transfers[0]).toMatchObject({ asset: 'btc', amount: 70_000 });
+  });
+
+  it('encodes USDCx addresses for both chains', () => {
+    // A real mainnet deposit: this recipient word minted 10 USDCx to SPWVCR…HW0H.
+    expect(stacksRecipientOf('SPWVCRSE70G9W9JQYHHHW23R2A695RSM5HAJHW0H')).toBe('0x00000000000000000000001639b6632e38209e2657f4631e0878128c92e3342c');
+    // EIP-55's own test vectors.
+    expect(ethAddressOf('0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed')).toBe('0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed');
+    expect(ethAddressOf('0xFB6916095CA1DF60BB79CE92CE3EA74C37C5D359')).toBe('0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359');
+    expect(() => ethAddressOf('0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeD')).toThrow('typo');
+    expect(() => ethAddressOf('0x5aaeb6053f3e94c9b9a09f33669435e7ef1bea')).toThrow('not an Ethereum address');
+    expect(Buffer.from(ethRecipientOf('0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed')).toString('hex')).toBe(`${'00'.repeat(12)}5aaeb6053f3e94c9b9a09f33669435e7ef1beaed`);
+    expect(usdcToMicro('12.5')).toBe(12_500_000);
+    expect(usdcToMicro('0.000001')).toBe(1);
+    expect(usdcToMicro('1.0000001')).toBeNull();
+    expect(usdcToMicro('0')).toBeNull();
+    expect(withdrawOutcome('[usdcx] step=burn tx=0xfeed ok=true status="success"\n[usdcx] done tx=0xfeed', 'usdc')).toMatchObject({ status: 'processing', stacksTxid: '0xfeed' });
+    expect(withdrawOutcome('[usdcx] failed error="the wallet holds 3"', 'usdc')).toMatchObject({ status: 'failed', message: expect.stringContaining('Nothing was sent') });
+  });
+
+  it('reads the xReserve deposit event of a real receipt', () => {
+    // Ethereum tx 0x548f3804…72f7: 10 USDC to SPWVCR…HW0H.
+    const log = {
+      address: '0x8888888199b2df864bf678259607d6d5ebb4e3ce',
+      topics: [
+        '0x2eef4ec627e0f99d1cc55f26e234a6066090b7bc0b3f61245f1f2d7c91d3e563',
+        '0x000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+        '0x0000000000000000000000005347979e2a4e5943960dd1e252b6cbfe93829bd2',
+        '0x00000000000000000000001639b6632e38209e2657f4631e0878128c92e3342c',
+      ],
+      data: `0x${['989680', '2713', '0616440caf0bbc800a33993ea85c2392aeb53696608b057573646378', '0', 'a0', '0'].map((w) => w.padStart(64, '0')).join('')}`,
+      transactionHash: '0x548f3804f47e02bc23617cf3135f02e26fbfb5c741ffc95fbd5218048fa872f7',
+    };
+    expect(depositOfLogs([log])).toEqual({ ok: true, recipient: stacksRecipientOf('SPWVCRSE70G9W9JQYHHHW23R2A695RSM5HAJHW0H'), domain: 10003, value: 10_000_000 });
+    expect(depositOfLogs([{ ...log, address: '0x0000000000000000000000000000000000000001' }])).toBeNull();
   });
 
   it('creates the data folder before starting a new bot', async () => {
@@ -457,12 +602,15 @@ describe('local console', () => {
     const view = (await call('POST', '/api/bots/sbtc/bridge-deposit')).body as { demo: boolean; withdraw: { heldSats: number }; transfers: unknown[] };
     expect(view.demo).toBe(true);
     expect(view.withdraw.heldSats).toBeGreaterThan(0);
-    expect(view.transfers).toHaveLength(3);
+    expect(view.transfers).toHaveLength(5);
     expect(existsSync(join(root, 'data', 'bridge.sbtc.json'))).toBe(false);
     await call('POST', '/api/bots/sbtc/bridge-demo-send');
     await store.syncBridges(new Date());
-    const after = (await call('GET', '/api/bots/sbtc/bridge')).body as { transfers: Array<{ kind: string; status: string }> };
-    expect(after.transfers[0]).toMatchObject({ kind: 'deposit', status: 'processing' });
+    const after = (await call('GET', '/api/bots/sbtc/bridge')).body as { transfers: Array<{ kind: string; asset: string; status: string }> };
+    expect(after.transfers[0]).toMatchObject({ kind: 'deposit', asset: 'btc', status: 'processing' });
+    await call('POST', '/api/bots/sbtc/bridge-demo-send', { asset: 'usdc' });
+    const usdc = (await call('GET', '/api/bots/sbtc/bridge')).body as { transfers: Array<{ kind: string; asset: string; status: string }> };
+    expect(usdc.transfers[0]).toMatchObject({ kind: 'deposit', asset: 'usdc', status: 'sent' });
   });
 
   it('refuses the demo hook outside demo mode', async () => {
@@ -733,6 +881,26 @@ describe('local console', () => {
     const listed = (await call('POST', '/api/wallet/accounts', { phrase }, PAGE)).body as { accounts: Array<{ account: number; bot: string | null }> };
     expect(listed.accounts.map((item) => item.account)).toEqual([0, 1, 2, 3, 4]);
     expect(listed.accounts[2].bot).toBe('stx');
+  });
+
+  it('keeps app-created and imported phrase wallets apart', async () => {
+    const { call, root } = boot();
+    const made = (await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'create' })).body as { bot: { address: string; keySource: string; walletAccount: number } };
+    const appPhrase = (JSON.parse(readFileSync(join(root, '.mm-wallet'), 'utf8')) as { phrase: string }).phrase;
+    expect(made.bot).toMatchObject({ keySource: 'app-phrase', walletAccount: 0, address: accountOf(appPhrase, 0).address });
+
+    // The user's own phrase: its key is stored, the phrase is not, and the app phrase is untouched.
+    const theirs = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art';
+    const imported = (await call('POST', '/api/bots', { profile: 'stx', wallet: 'phrase', phrase: theirs, account: 0 })).body as { bot: { address: string; keySource: string } };
+    expect(imported.bot).toMatchObject({ keySource: 'phrase', address: accountOf(theirs, 0).address });
+    expect((JSON.parse(readFileSync(join(root, '.mm-wallet'), 'utf8')) as { phrase: string }).phrase).toBe(appPhrase);
+
+    // The app phrase pasted back in as an import takes account 1, so the next app bot skips to 2.
+    const reused = (await call('POST', '/api/bots', { profile: 'sbtc', wallet: 'phrase', phrase: appPhrase, account: 1 })).body as { bot: { address: string } };
+    expect(reused.bot.address).toBe(accountOf(appPhrase, 1).address);
+    const next = (await call('POST', '/api/bots', { profile: 'stx', wallet: 'create' })).body as { bot: { address: string; walletAccount: number } };
+    expect(next.bot).toMatchObject({ walletAccount: 2, address: accountOf(appPhrase, 2).address });
+    expect(((await call('GET', '/api/wallet')).body as { nextAccount: number }).nextAccount).toBe(3);
   });
 
   it('does not ask to back up an imported key', async () => {

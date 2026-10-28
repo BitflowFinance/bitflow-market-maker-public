@@ -37,7 +37,7 @@ html, body { margin: 0; }
 .nx .brand2 { display: flex; align-items: center; gap: 9px; font-weight: 650; color: var(--ink); font-size: 14px; }
 .nx .brand2:hover { text-decoration: none; }
 .nx .brand-sub { font-size: 11px; font-weight: 500; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px; }
-.nx .conn { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-2); padding: 4px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line-soft); }
+.nx .conn { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-2); padding: 4px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); }
 .nx .conn.bad, .nx .conn.t-serious { color: var(--serious-ink); background: var(--serious-bg); border-color: color-mix(in srgb, var(--serious) 40%, transparent); }
 .nx .conn.t-warn { color: var(--warn-ink); background: var(--warn-bg); border-color: var(--warn-line); }
 .nx .conn { position: relative; cursor: default; transition: background .12s, border-color .12s; }
@@ -62,6 +62,10 @@ html, body { margin: 0; }
 /* Header buttons: outlined and the same height as the status chip beside them. */
 .nx .topbar .ibtn { width: 32px; height: 32px; border-color: var(--line); }
 .nx .topbar .conn { height: 32px; padding: 0 12px; border-radius: 8px; }
+.nx .hbtn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: none; color: var(--ink-2); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.nx .hbtn:hover:not(:disabled) { color: var(--serious-ink); background: var(--serious-bg); border-color: color-mix(in srgb, var(--serious) 40%, transparent); }
+.nx .hbtn:disabled { opacity: .6; cursor: default; }
+@media (max-width: 600px) { .nx .hbtn { padding: 0; width: 32px; justify-content: center; } .nx .hbtn-t { display: none; } }
 .nx .topbar .ibtn:hover { background: var(--sel); }
 .nx .ibtn.sm { width: 24px; height: 24px; border-radius: 6px; }
 .nx .ibtn.done { color: var(--good-ink); }
@@ -402,7 +406,7 @@ html, body { margin: 0; }
 .nx .fact-row { display: grid; grid-template-columns: minmax(120px, 34%) minmax(0, 1fr); gap: 12px; padding: 9px 0; border-top: 1px solid var(--line-soft); }
 .nx .fact-row:first-child { border-top: 0; padding-top: 0; }
 .nx .fact-row dt { color: var(--muted); font-size: 12.5px; }
-.nx .fact-row dd { margin: 0; }
+.nx .fact-row dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .nx .note-in { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .nx .checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .nx .checks li { display: flex; gap: 11px; align-items: flex-start; }
@@ -498,7 +502,8 @@ html, body { margin: 0; }
 .nx .warnline .ico { margin-top: 2px; }
 .nx .addrbox { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 12px 14px; border-radius: 10px; background: var(--page); border: 1px solid var(--line); }
 .nx .addrbox-k { grid-column: 1 / -1; font-size: 12px; color: var(--muted); font-weight: 550; }
-.nx .addrbox-v { font-size: 13px; word-break: break-all; }
+/* Addresses have no descenders, so the line box's descender space read as extra bottom padding; trimming to cap height centres them. */
+.nx .addrbox-v { font-size: 13px; word-break: break-all; text-box: trim-both cap alphabetic; }
 .nx .keybtns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 /* Code on top, address below it at full width, both aligned left. */
 .nx .fundaddr { display: grid; gap: 12px; justify-items: start; }
@@ -509,6 +514,13 @@ html, body { margin: 0; }
 /* The card's 14px gap plus 6px above the divider, 20px padding below it, so it sits centred. */
 .nx .pickpool { display: grid; gap: 10px; margin-top: 6px; padding-top: 20px; border-top: 1px solid var(--line-soft); }
 /* A second heading inside a card, matching the card's own title. */
+/* The table's last row pads 9px below its text and the card gap adds 14px; -3px makes the divider 20px from the text on both sides. */
+.nx .tbl.fund tr:last-child td { border-bottom: 0; }
+.nx .fund-how { display: grid; gap: 14px; margin-top: -3px; padding-top: 20px; border-top: 1px solid var(--line-soft); }
+.nx .ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+/* Icon centred on the title's line (21px tall), not on title and subtitle together. */
+.nx .choice.way { align-items: flex-start; }
+.nx .choice.way > .ico { margin-top: 1.5px; }
 .nx .sub-h { font-size: 14.5px; font-weight: 650; line-height: 1.2; }
 .nx .pl-row.off.on { border-style: solid; border-color: var(--warn); background: var(--warn-bg); color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 20%, transparent); }
 .nx .pl { display: grid; gap: 8px; }
@@ -544,7 +556,7 @@ html, body { margin: 0; }
 .nx .dep { display: grid; gap: 14px; }
 .nx .dep-main { display: flex; gap: 16px; align-items: center; }
 .nx .dep-addr { display: grid; gap: 6px; justify-items: start; min-width: 0; }
-.nx .dep-v { font-size: 13px; word-break: break-all; line-height: 1.5; }
+.nx .dep-v { font-size: 13px; word-break: break-all; line-height: 1.5; text-box: trim-both cap alphabetic; }
 .nx .dep-warn { margin: 0; font-size: 13px; color: var(--warn-ink); }
 .nx .kv { margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 12px 14px; border-radius: 10px; background: var(--panel-2); }
 .nx .kv dt { font-size: 12px; color: var(--muted); }
@@ -552,10 +564,14 @@ html, body { margin: 0; }
 .nx .bout { display: grid; gap: 14px; }
 .nx .field-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .nx .field-aside { font-size: 12px; color: var(--muted); display: inline-flex; gap: 8px; }
+.nx .balfill { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.nx .balfill:hover, .nx .balfill:focus-visible { color: var(--accent); text-decoration: underline; }
 .nx .linkbtn { font: inherit; font-weight: 600; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; }
 .nx .in.in-lg { font-size: 18px; padding-top: 10px; padding-bottom: 10px; }
 .nx .btn.wide { width: 100%; height: 52px; font-size: 16px; font-weight: 650; border-radius: 11px; }
 .nx .pick-more { display: flex; gap: 8px; }
+.nx .choice-acts { display: inline-flex; gap: 14px; flex: none; }
+.nx .wallet-ic { width: 24px; height: 24px; border-radius: 6px; flex: none; }
 .nx .choice-act { font-size: 13px; font-weight: 600; color: var(--accent); white-space: nowrap; }
 .nx .act { list-style: none; margin: 0; padding: 0; display: grid; }
 .nx .act li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 14px; align-items: center; padding: 11px 0; border-top: 1px solid var(--line-soft); }
@@ -603,3 +619,9 @@ html, body { margin: 0; }
 .words li { counter-increment: w; }
 .words li::before { content: counter(w) '.'; display: inline-block; width: 24px; color: var(--muted, #888); }
 textarea.in { resize: vertical; min-height: 64px; }
+.nx .bridge-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.nx .bridge-h .page-t { margin: 0; }
+.nx .asset-pick { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--panel-2); }
+.nx .asset-pick button { font: inherit; font-size: 13.5px; font-weight: 650; padding: 6px 14px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+.nx .asset-pick button:hover { color: var(--ink); }
+.nx .asset-pick button.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / 0.18), 0 0 0 1px var(--line); }

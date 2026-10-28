@@ -45,6 +45,7 @@ An agent uses the same helper: send JSON (`content-type: application/json`) to `
 | `GET /api/bots/:id/decisions.csv` | Every recorded check as CSV |
 | `POST /api/bots/:id/pause` | Kill switch. Process stays up. Liquidity stays in the pool. |
 | `POST /api/bots/:id/resume` | Clear the kill switch |
+| `POST /api/pause-all` | Pause every running bot (the header's Pause all). Stopped bots are left alone. |
 | `POST /api/bots/:id/start` | Start the process |
 | `POST /api/bots/:id/stop` | Stop the process. Does not withdraw |
 | `POST /api/bots/:id/settings` | Save settings and restart. Body `settings`. Going live also needs `confirmLive: true` and `poolName`. |
@@ -52,9 +53,10 @@ An agent uses the same helper: send JSON (`content-type: application/json`) to `
 | `POST /api/bots/:id/manual` | Swap, add, or withdraw. Live only. Body includes `acknowledged: true` and `poolName`. |
 | `POST /api/bots/:id/cash-out` | Pause and stop the bot, withdraw everything, and send all tokens and STX to the saved payout address. Works in dry run. Body `acknowledged: true` and `poolName`. |
 | `GET /api/bots/:id/cash-out` | Progress of the last cash out (`running`, `done`, or `failed`) with its steps and tx ids |
-| `GET /api/bots/:id/bridge` | The bot's sBTC deposit address, withdrawal limits and fee, and every bridge transfer |
+| `GET /api/bots/:id/bridge` | The bot's sBTC deposit address, sBTC and USDCx limits and fees, and every bridge transfer |
 | `GET /api/bridge` | Every bot's bridge transfers, newest first |
 | `POST /api/bots/:id/bridge-deposit` | Make the bot's BTC deposit address. Nothing leaves the wallet. |
+| `POST /api/bots/:id/bridge-usdc-deposit` | Follow a USDC deposit sent from an Ethereum wallet. Body `ethTxid`, `amount`. Nothing leaves the bot wallet. |
 
 **Keep `npm run ui` running.** Bots started from the page stop when it stops: closing its terminal, restarting the computer, or letting it sleep all stop a live bot. Liquidity stays in the pool while it is stopped.
 
@@ -68,13 +70,16 @@ Two bots can never share a wallet: the page refuses an address another bot alrea
 
 **Cash out** goes only to a payout address you save on the Wallet tab. Saving or changing that address and showing the key work only in the page, not through the API, so an agent can cash out but cannot send funds anywhere else. If a cash out stops partway, run it again: each step reads live balances and finishes what is left. From the command line: `npm run tick -- --pool sbtc --cash-out --to SP… [--memo …]`.
 
-**Bridge** (its own page in the sidebar, and the Fund step of a new sBTC bot) moves BTC in and out through the official sBTC bridge:
+**Bridge** (its own page in the sidebar, and the Fund step of a new bot) moves BTC in and out through the official sBTC bridge, and USDC through Circle's xReserve:
 
 - **BTC → sBTC.** Each bot gets a Bitcoin deposit address. Send BTC to it from any wallet or exchange; the page finds the transaction and registers it with the sBTC signers itself, while `npm run ui` is running. The refund key is the bot's own key, so an unprocessed deposit can be reclaimed with the key you backed up after 950 Bitcoin blocks.
 - **sBTC → BTC.** Sends sBTC from the bot wallet to a Bitcoin address you type, like cash out: page only, the bot paused or stopped, and from sBTC in the wallet (not the pool). From the command line: `npm run tick -- --pool sbtc --sbtc-withdraw --amount <sats> --to bc1… --max-fee <sats>`.
-- **USDC ↔ USDCx** is not built in yet; the tab links to bridge.stacks.co.
+- **USDC → USDCx.** Connect an Ethereum wallet (MetaMask, Rabby, Coinbase Wallet) on the page; it approves the exact amount and calls xReserve's `depositToRemote` with the bot's Stacks address. The console never sees that wallet's key: the page hands it the transaction hash and it follows the deposit to the USDCx mint on Stacks (about 15 minutes, minimum 10 USDC, no fee beyond Ethereum gas, no STX needed to receive).
+- **USDCx → USDC.** Burns USDCx from the bot wallet to an Ethereum address you type, with the same rules as sBTC → BTC. Circle takes 2.00 USDC off the payout, which arrives in about an hour; the minimum is read from `usdcx-v1` (4.80 USDCx today). From the command line: `npm run tick -- --pool stx --usdcx-withdraw --amount <micro-USDCx> --to 0x…`.
 
-Transfers are kept in `data/bridge.<bot>.json`. To try the Bridge page without real BTC, run `npm run ui:demo`: balances and transfers are made up, move through each stage on a timer, and are kept apart in `data/bridge.<bot>.demo.json`. Default ports are `5191` for the page and `4173` for the API (`CONSOLE_PAGE_PORT`, `CONSOLE_API_PORT`).
+Ethereum is read through a public node (publicnode) by default; set `ETH_RPC_URL` in the environment of `npm run ui` to use your own.
+
+Transfers are kept in `data/bridge.<bot>.json`. To try the Bridge page without real BTC or USDC, run `npm run ui:demo`: balances and transfers are made up, move through each stage on a timer, and are kept apart in `data/bridge.<bot>.demo.json`. Default ports are `5191` for the page and `4173` for the API (`CONSOLE_PAGE_PORT`, `CONSOLE_API_PORT`).
 
 ## The curve (peaked at the active bin)
 

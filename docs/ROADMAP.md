@@ -24,8 +24,6 @@ Ideas we have agreed to build later. Not scheduled yet.
 
 ## Bridging, what is left
 
-BTC ↔ sBTC is on the Bridge page and the Fund step. Still to build:
+BTC ↔ sBTC and USDC ↔ USDCx are on the Bridge page and the Fund step. Still to build:
 
-- USDCx → USDC: the bot signs `usdcx-v1.burn` to an Ethereum address, like the sBTC withdrawal.
-- USDC → USDCx: approve + `depositToRemote` on Ethereum's xReserve, which needs an Ethereum wallet in the page (or a link out with the bot address ready).
 - Reclaiming a failed sBTC deposit from the page (`buildSbtcReclaimTx`, signed with the bot key).

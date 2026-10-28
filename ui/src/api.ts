@@ -233,18 +233,28 @@ export interface ProfileInfo {
   suggest: { base: string; quote: string; gas: string; note: string };
 }
 
+export type BridgeAsset = 'btc' | 'usdc';
+
 export interface BridgeTransfer {
   id: string;
   kind: 'deposit' | 'withdraw';
+  asset: BridgeAsset;
   status: 'sending' | 'sent' | 'processing' | 'done' | 'failed';
-  amountSats: number;
+  /** Sats for BTC, micro-units for USDC. */
+  amount: number;
   message: string;
   createdAt: string;
   updatedAt: string;
   btcTxid: string | null;
   stacksTxid: string | null;
   btcAddress?: string;
+  /** A BTC deposit's sBTC deposit address. */
+  depositAddress?: string;
   maxFeeSats?: number;
+  ethTxid?: string | null;
+  ethAddress?: string;
+  /** What arrived, when Circle's fee came off. */
+  received?: number;
 }
 
 export interface BridgeView {
@@ -255,6 +265,8 @@ export interface BridgeView {
   tradesSbtc: boolean;
   deposit: { address: string; minSats: number | null; feeSats: number | null; maxFeeSats: number; lockBlocks: number } | null;
   withdraw: { minSats: number; maxSats: number | null; feeSats: number | null; costSats: number | null; heldSats: number | null; blocked: string | null };
+  /** USDC <-> USDCx through Circle's xReserve. Amounts in micro-units. */
+  usdc: { recipient: string; domain: number; xReserve: string; token: string; depositMin: number; withdrawMin: number; withdrawFee: number; held: number | null };
   stx: number | null;
   transfers: BridgeTransfer[];
 }
@@ -278,6 +290,8 @@ export const botFromPath = <T extends { id: string; pair: string; preview: boole
 
 export const mempoolTx = (txid: string): string => `https://mempool.space/tx/${txid}`;
 export const mempoolAddress = (address: string): string => `https://mempool.space/address/${address}`;
+export const etherscanTx = (hash: string): string => `https://etherscan.io/tx/${hash}`;
+export const etherscanAddress = (address: string): string => `https://etherscan.io/address/${address}`;
 
 export class ApiError extends Error {
   status: number;

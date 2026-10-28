@@ -805,8 +805,14 @@ export const toView = (record: BotRecord, sharedAddress: boolean, nowMs: number)
   const strategic: BotRecord = { ...record, lastTick: signalled };
   const tick = valued;
   const price = priceOf(shown);
-  const value = tick ? (tick.portfolioValue ?? null) : null;
-  const baseValue = tick && price != null ? ((tick.walletBase || 0) + (tick.ownedBase || 0)) * price : null;
+  // A stopped bot's last check can be days old, from before the wallet was
+  // funded or emptied, so its wallet side comes from the live chain read. The
+  // pool side has no other source and keeps the last check's amounts.
+  const live = !record.running && record.liveWallet && price != null ? record.liveWallet : null;
+  const walletBase = live ? live.base : tick ? tick.walletBase || 0 : 0;
+  const walletQuote = live ? live.quote : tick ? tick.walletQuote || 0 : 0;
+  const value = live && price != null ? (walletBase + (tick?.ownedBase || 0)) * price + walletQuote + (tick?.ownedQuote || 0) : tick ? (tick.portfolioValue ?? null) : null;
+  const baseValue = (live || tick) && price != null ? (walletBase + (tick?.ownedBase || 0)) * price : null;
   return {
     id: record.id,
     profile: record.profile,
