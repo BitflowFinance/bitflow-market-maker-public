@@ -30,6 +30,16 @@ Then open http://127.0.0.1:5191. Or ask your coding agent to "set up this repo a
 
 Preview bots are on the first screen. They have no wallet and the balances are fake. Create a real bot in the page. It always starts in dry run.
 
+### Already running the scripts?
+
+Your bots carry over with no code or env changes:
+
+1. **Stop the old bot first.** The page can only tell a bot is running if the current version started it. A bot left running from the old scripts shows as stopped, and pressing Start would run a second copy on the same wallet.
+2. `git pull`, then `npm install` (there are new dependencies).
+3. `npm run ui`, open the page, and press Start on each bot.
+
+`.env.sbtc` and `.env.stx` show up as they are, with their wallet, settings and history. A bot that was live stays live. Old pool aliases (`dlmm_1`, `dlmm_3`, `dlmm_14`) are rewritten to the pool's contract id the first time the page opens, and the pool itself does not change. An env file under another name, such as `.env.mybot`, needs `BOT_PROFILE=sbtc` or `BOT_PROFILE=stx` added to show up. A plain `.env` is not listed.
+
 There is no login. The helper listens on `127.0.0.1` only and refuses requests from other websites or hostnames.
 
 An agent uses the same helper: send JSON (`content-type: application/json`) to `http://127.0.0.1:4173`. Risky calls stay risky: dry run refuses manual trades, a withdraw must be paused first, and leaving dry run requires `confirmLive` plus the exact pool name.
