@@ -1,5 +1,5 @@
 import { CONFIG } from './config';
-import { fetchJson, fetchJsonAllowMissing, getFtBalance } from './stacks';
+import { describeFetchError, fetchJson, fetchJsonAllowMissing, getFtBalance } from './stacks';
 import { logDebug, logWarn } from './logger';
 import { getNonceInfo } from './wallet';
 
@@ -195,6 +195,23 @@ export interface TipCheck {
   fresh: boolean;
   reason: string;
 }
+
+// One un-retried probe before the tick loop. Any HTTP answer, even an error
+// status, proves the host is reachable; only a transport failure means every
+// tick would freeze on snapshot_fetch_failed. Returns the failure, or null.
+export const probeBff = async (timeoutMs = 10_000): Promise<string | null> => {
+  let url = CONFIG.BFF_API_BASE_URL;
+  try {
+    url = `${base()}/quotes/v2/status`;
+    await fetch(url, {
+      headers: CONFIG.BFF_API_KEY ? { 'X-API-Key': CONFIG.BFF_API_KEY } : {},
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return null;
+  } catch (err) {
+    return describeFetchError(err, url).message;
+  }
+};
 
 // v2 serves quotes from in-memory AMM state at the applied tip, so there is no
 // stale-DB fallback to lean on: freshness has to be asserted before we size an

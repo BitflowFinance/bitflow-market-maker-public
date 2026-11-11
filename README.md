@@ -146,6 +146,16 @@ What you need before `npm install`. Facts only; how much to fund is your decisio
 
 No API keys are needed. `BFF_API_KEY` can stay blank. `STACKS_NODE_URL` can stay blank too; the bot then uses the public Hiro API, which is rate limited. Set your own node or a paid endpoint if you see `429` errors in the log.
 
+**Network access.** The bot makes outbound HTTPS calls to these hosts, so a VPN, corporate proxy, firewall or web filter must let them through:
+
+| Host | Used for | Override |
+|---|---|---|
+| `bff.bitflowapis.finance` | Pool state, bins, positions, token registry | `BFF_API_BASE_URL` |
+| `api.mainnet.hiro.so` | Balances, nonces, contract reads, broadcasts | `STACKS_NODE_URL` |
+| `api.coingecko.com` (`pro-api.coingecko.com` with a key) | Reference price | `COINGECKO_BASE_URL` |
+
+At startup the bot logs `BFF reachable` or `BFF unreachable` with the host and the network error. If it says unreachable, every tick holds as `frozen` with `snapshot_fetch_failed` until the BFF answers. An SSL error such as `ERR_SSL_WRONG_VERSION_NUMBER` usually means something on your network answered in place of the real host. The preview bots on the local page use made-up data, so they keep running even when the BFF is blocked.
+
 ## Setup
 
 ```bash
