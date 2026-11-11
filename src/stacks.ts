@@ -111,6 +111,32 @@ export const callReadOnly = async (
   }, CONFIG.STACKS_CALL_MAX_RETRIES);
 };
 
+// Node's fetch rejects with a bare "fetch failed" and hides the reason in
+// err.cause. That reason (TLS, DNS, refused, timeout) plus the host is what lets
+// an operator tell a VPN/proxy/filter on their side from an outage or a bad URL.
+export const describeFetchError = (err: unknown, url: string): Error => {
+  const error = err as Error & { cause?: { code?: string; message?: string } };
+  let host = url;
+  try {
+    host = new URL(url).host;
+  } catch {
+    // keep the raw url
+  }
+  const { code } = error.cause ?? {};
+  // OpenSSL messages end in a newline, which would split a single-line log entry.
+  const message = error.cause?.message?.replace(/\s+/g, ' ').trim();
+  const detail = code && message && !message.includes(code) ? `${code}: ${message}` : message || code;
+  return new Error(`${error.message} host="${host}"${detail ? ` cause="${detail}"` : ''}`);
+};
+
+const fetchOrDescribe = async (url: string, init: RequestInit): Promise<Response> => {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    throw describeFetchError(err, url);
+  }
+};
+
 export const fetchJson = async <T = unknown>(
   url: string,
   apiKey = '',
@@ -118,7 +144,7 @@ export const fetchJson = async <T = unknown>(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) headers['X-API-Key'] = apiKey;
   return retry(async () => {
-    const res = await fetch(url, { headers });
+    const res = await fetchOrDescribe(url, { headers });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} (${url})`);
     return (await res.json()) as T;
   }, CONFIG.STACKS_CALL_MAX_RETRIES);
@@ -145,7 +171,7 @@ export const fetchJsonAllowMissing = async <T = unknown>(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) headers['X-API-Key'] = apiKey;
   return retry(async () => {
-    const res = await fetch(url, { headers });
+    const res = await fetchOrDescribe(url, { headers });
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} (${url})`);
     return (await res.json()) as T;

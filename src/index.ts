@@ -2,7 +2,7 @@ import { Server } from 'http';
 import { startMetricsServer } from './api';
 import { runCashOut } from './cashout';
 import { clearPidFile, writePidFile } from './pid';
-import { fetchTokens, resolvePoolId } from './bitflow';
+import { fetchTokens, probeBff, resolvePoolId } from './bitflow';
 import { CONFIG, hydrateTokenMetadata } from './config';
 import { broadcastLiquidity, prepareAddLiquidity, prepareWithdrawLiquidity } from './liquidity';
 import { logError, logInfo, logWarn } from './logger';
@@ -204,6 +204,19 @@ const main = async (): Promise<void> => {
   if (CONFIG.EXECUTION_MODE === 'live') {
     assertSignerKeyMatchesAddress();
     logInfo('[index] signer key/address check passed');
+  }
+
+  // Startup stays tolerant of a BFF outage (the tick guards hold until it
+  // answers), but without this the only symptom is a repeating
+  // snapshot_fetch_failed guardrail that never names the host or the cause.
+  const bffError = await probeBff();
+  if (bffError) {
+    logError(
+      `[index] BFF unreachable url="${CONFIG.BFF_API_BASE_URL}" error="${bffError}"; ` +
+        'every tick will hold until it answers. Check VPN/proxy/firewall/web-filter access to that host, or set BFF_API_BASE_URL',
+    );
+  } else {
+    logInfo(`[index] BFF reachable url="${CONFIG.BFF_API_BASE_URL}"`);
   }
 
   // Resolve token asset names + decimals from the BFF before any action.
