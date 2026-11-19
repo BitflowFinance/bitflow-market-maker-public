@@ -2,6 +2,16 @@
 
 > **Mainnet, real funds.** This bot signs transactions with your private key and deploys your tokens into live pools. It is provided as is, without warranty, and has not been independently audited. Nothing in this repository is financial advice, and no outcome is guaranteed. Every value in the env files is a default, not a recommendation. You are responsible for your keys, your positions, and any losses. Start small and read [SECURITY.md](./SECURITY.md) and [docs/RECOVERY.md](./docs/RECOVERY.md) before going live.
 
+## Start with your coding agent
+
+Paste this into Claude Code, Codex, Cursor or any coding agent that can run a terminal:
+
+```text
+Clone https://github.com/BitflowFinance/bitflow-market-maker-public, open AGENTS.md and follow its "Setting up the app" section to start the local app, then give me the URL. Stay in dry run: do not create a real bot, fund a wallet or go live unless I ask. Never ask me for my private key or recovery phrase.
+```
+
+The agent installs dependencies, starts the local page and checks that it answers. You get preview bots with fake balances to explore first. Showing or backing up a key, saving a payout address and sending funds out through the Bridge work only on the page, so the agent cannot do them. Going live needs an explicit confirmation with the exact pool name.
+
 A TypeScript market maker for **Bitflow DLMM** pools on Stacks. This public edition is built for the two competition pairs:
 
 | Pair | Profile | Pool | Strategy |
@@ -26,7 +36,7 @@ npm install
 npm run ui
 ```
 
-Then open http://127.0.0.1:5191. Or ask your coding agent to "set up this repo and start the app"; [AGENTS.md](./AGENTS.md) has the steps.
+Then open http://127.0.0.1:5191. To have a coding agent do this for you, use the prompt in [Start with your coding agent](#start-with-your-coding-agent).
 
 Preview bots are on the first screen. They have no wallet and the balances are fake. Create a real bot in the page. It always starts in dry run.
 
