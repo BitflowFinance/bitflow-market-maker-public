@@ -19,7 +19,7 @@ import { LadderBin, PRICE_SCALE, fetchPoolBins, fetchQuotesPool } from './bitflo
 import { CONFIG } from './config';
 import { TokenRef, poolRef } from './liquidity';
 import { microToString, parseContract } from './stacks';
-import { ContractCall } from './wallet';
+import { ContractCall, txDeadline } from './wallet';
 
 // Neutral pool roles: base = the quoted asset, quote = the numeraire.
 // Native-STX handling (post-conditions) is keyed off the token contract via
@@ -160,20 +160,22 @@ export const buildSwapCall = (plan: SwapPlan, signer: string): ContractCall => {
   const inputToken = plan.xForY ? pool.x : pool.y;
   const outputToken = plan.xForY ? pool.y : pool.x;
 
+  const functionArgs = [
+    cp(plan.poolContract),
+    cp(plan.xToken),
+    cp(plan.yToken),
+    uintCV(plan.amountIn),
+    uintCV(plan.minReceived),
+    uintCV(plan.maxSteps),
+    plan.deadline ? someCV(uintCV(plan.deadline)) : noneCV(),
+  ];
   return {
     contract: CONFIG.SWAP_ROUTER_CONTRACT,
     functionName: plan.xForY
       ? 'swap-x-for-y-simple-range-multi'
       : 'swap-y-for-x-simple-range-multi',
-    functionArgs: [
-      cp(plan.poolContract),
-      cp(plan.xToken),
-      cp(plan.yToken),
-      uintCV(plan.amountIn),
-      uintCV(plan.minReceived),
-      uintCV(plan.maxSteps),
-      plan.deadline ? someCV(uintCV(plan.deadline)) : noneCV(),
-    ],
+    functionArgs,
+    ...(plan.deadline ? { deadlineArgIndex: functionArgs.length - 1 } : {}),
     postConditions: [
       outflowPc(inputToken, signer, plan.amountIn),
       inflowPc(outputToken, plan.poolContract, plan.minReceived),
@@ -182,8 +184,6 @@ export const buildSwapCall = (plan: SwapPlan, signer: string): ContractCall => {
       CONFIG.SWAP_POST_CONDITION_MODE === 'allow' ? PostConditionMode.Allow : PostConditionMode.Deny,
   };
 };
-
-const deadline = (): number => Math.floor(Date.now() / 1000) + CONFIG.TX_DEADLINE_SECONDS;
 
 export interface PreparedSwap {
   call: ContractCall;
@@ -233,7 +233,7 @@ export const prepareSwap = async (req: SwapRequest): Promise<PreparedSwap> => {
       minReceived,
       xForY,
       maxSteps,
-      deadline: deadline(),
+      deadline: txDeadline(),
     },
     req.signer,
   );
