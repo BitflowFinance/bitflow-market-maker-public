@@ -9,41 +9,16 @@ npm test           # Run the vitest suite once
 npm run tick -- --pool sbtc   # Single tick (dry-run friendly)
 npm run dev -- --pool sbtc    # Loop with auto-reload
 npm start -- --pool sbtc      # Compiled loop (prefer `node dist/index.js`)
-npm run ui         # Local app at http://127.0.0.1:5191. See "Setting up the app" below.
+npm run ui         # Local app at http://127.0.0.1:5191. See "Running the app for a user" below.
 ```
 
-## Setting up the app
+## Running the app for a user
 
-When a user has just downloaded this repo and asks you to set it up, get the app online and hand them the URL:
+To set up the app, start it, or operate bots for a user (watch, pause, change pools, go live, cash out), follow [`skills/bitflow-mm/SKILL.md`](./skills/bitflow-mm/SKILL.md). It holds the setup steps, the safety rules, the local API reference and the error table. This file covers changing the code.
 
-1. Check Node: `node -v` must be 20 or newer. If it is older or missing, install Node 22 (for example `nvm install 22 && nvm use 22`).
-2. From the repo root, run `npm install`.
-3. Run `npm run ui` and leave it running in the background. On first run it installs `ui/` dependencies itself.
-4. Wait for `Bitflow Market Maker is running: http://127.0.0.1:5191`, then confirm with `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5191/api/fleet` (expect `200`).
-5. Tell the user to open http://127.0.0.1:5191. There is no login. Preview bots with fake funds are already running, so the page is useful immediately.
+The short version, when a user has just cloned the repo: `npm install`, then `npm run ui`, then hand them http://127.0.0.1:5191. Don't create a real bot, fund a wallet or go live unless they ask, and never read, print or repeat `SIGNER_KEY`.
 
-Do not create a real bot, go live, or fund a wallet unless the user asks. If port 5191 or 4173 is taken, set `CONSOLE_PAGE_PORT` / `CONSOLE_API_PORT`.
-
-Bots started from the page stop when `npm run ui` stops, and a background shell you started usually ends with your session. Before a user takes a bot live, tell them to run `npm run ui` in their own terminal and keep it open, and that sleep or a restart stops the bot too.
-
-## Local page
-
-There is no login code. The helper only answers requests from this computer: it checks the `Host` and `Origin` headers, refuses cross-site browser requests, and requires `content-type: application/json` on writes. Do not put `SIGNER_KEY` in chat, in a tool argument, or in a page response.
-
-Agent calls go to `http://127.0.0.1:4173` with `content-type: application/json`. The page itself is `http://127.0.0.1:5191` and proxies `/api` to that helper.
-
-- `GET /api/fleet` answers how the bots are doing. Each bot carries `insights` (time in range, trades and gas over 24h and all time), `market` (pool vs market price and the gap against the halt limit), `inventory`, `curve`, and `walletStx` / `gasTxLeft`.
-- `GET /api/pools?profile=sbtc|stx` ranks the pair's pools (`recommended`, and `reasons` for each skipped one). `POST /api/bots/:id/pool` with `poolId`, `acknowledged: true`, and the exact `poolName` changes pools; it runs in the background (`poolSwitch` on the bot), withdraws first when live, and changes nothing unless the old pool is confirmed empty. Only change pools when the user asks.
-- `GET /api/bots/:id/history?range=1d|7d|all` gives chart points; `GET /api/bots/:id/decisions.csv` gives every recorded check.
-- `POST /api/bots/:id/pause`, `/resume`, `/start`, `/stop` control the process. Pause is the kill switch and does not withdraw. Stop does not withdraw. `POST /api/pause-all` (the header's Pause all) pauses every running bot and leaves stopped ones alone.
-- `POST /api/bots/:id/manual` is a swap, add, or withdraw. Dry run returns 409. Withdraw returns 409 until the bot is paused. Body must include `acknowledged: true` and `poolName` equal to `sBTC / USDCx` or `STX / USDCx`.
-- `POST /api/bots/:id/settings` writes the env file and restarts. `SIGNER_KEY` is rejected. Setting `EXECUTION_MODE` to `live` also requires `confirmLive: true` and the exact `poolName`.
-- `POST /api/bots/:id/cash-out` pauses and stops the bot, withdraws everything, and sends all tokens and STX to the saved payout address. It works in dry run. Body must include `acknowledged: true` and the exact `poolName`; it returns 409 `no_payout` until the user saves an address. It runs in the background: poll `GET /api/bots/:id/cash-out` until `status` is `done` or `failed`. A `failed` run is safe to repeat. Only cash out when the user asks in chat.
-- `key-backup`, `key-saved`, and `payout` answer only the page (403 `page_only` otherwise). Do not try to get around that: never read, print, or repeat `SIGNER_KEY`, and never set or suggest a payout address the user did not type themselves. Send the user to the Wallet tab instead.
-- `GET /api/bridge` lists every bot's transfers. `GET /api/bots/:id/bridge` gives the bot's sBTC deposit address, withdrawal limits, and transfers. `POST /api/bots/:id/bridge-deposit` makes the deposit address (nothing leaves the wallet; the console finds and registers deposits itself). `bridge-usdc-deposit` records a USDC deposit the user sent from their Ethereum wallet (the receipt is checked against the bot address before it counts). `bridge-withdraw` (sBTC to a Bitcoin address) and `bridge-usdc-withdraw` (USDCx to an Ethereum address) send funds out, so they answer only the page; send the user to the Bridge page.
-- Preview ids look like `preview-sbtc`.
-
-New bots are created with `POST /api/bots` and always start in dry run. Importing a key writes it to `.env.<pool>` and the JSON response must not contain it.
+When you change a console route, its guard or an error code, update `skills/bitflow-mm/references/api.md` and `errors.md` in the same change.
 
 **Note:** Tests run with vitest (`npm test`). No separate linter; `tsconfig` has
 `strict`, `noUnusedLocals`, and `noUnusedParameters` on, so `npm run build` /

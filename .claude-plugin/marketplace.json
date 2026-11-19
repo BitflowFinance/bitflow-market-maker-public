@@ -1,0 +1,17 @@
+{
+  "name": "bitflow",
+  "owner": {
+    "name": "Bitflow"
+  },
+  "metadata": {
+    "description": "Bitflow agent skills"
+  },
+  "plugins": [
+    {
+      "name": "bitflow-mm",
+      "source": "./",
+      "description": "Set up and operate the Bitflow DLMM market maker on Stacks: start the local app, watch and pause bots, change pools, fund through the bridge and cash out, with dry run by default and page-only guards on keys and withdrawals.",
+      "version": "0.1.0"
+    }
+  ]
+}

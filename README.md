@@ -7,8 +7,13 @@
 Paste this into Claude Code, Codex, Cursor or any coding agent that can run a terminal:
 
 ```text
-Clone https://github.com/BitflowFinance/bitflow-market-maker-public, open AGENTS.md and follow its "Setting up the app" section to start the local app, then give me the URL. Stay in dry run: do not create a real bot, fund a wallet or go live unless I ask. Never ask me for my private key or recovery phrase.
+Clone https://github.com/BitflowFinance/bitflow-market-maker-public, read skills/bitflow-mm/SKILL.md and follow its Setup section to start the local app, then give me the URL. Stay in dry run: do not create a real bot, fund a wallet or go live unless I ask. Never ask me for my private key or recovery phrase.
 ```
+
+The skill teaches the agent the local API, what it may and may not do, and what each error means. To keep it installed for later conversations:
+
+- **Claude Code:** `/plugin marketplace add BitflowFinance/bitflow-market-maker-public`, then `/plugin install bitflow-mm@bitflow`.
+- **Other agents:** `npx skills add BitflowFinance/bitflow-market-maker-public`.
 
 The agent installs dependencies, starts the local page and checks that it answers. You get preview bots with fake balances to explore first. Showing or backing up a key, saving a payout address and sending funds out through the Bridge work only on the page, so the agent cannot do them. Going live needs an explicit confirmation with the exact pool name.
 
