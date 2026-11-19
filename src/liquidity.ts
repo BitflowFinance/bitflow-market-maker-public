@@ -34,7 +34,7 @@ import { CONFIG } from './config';
 import { logWarn } from './logger';
 import { getBinTotalSupply, microToString, parseContract } from './stacks';
 import { allocateCurve, CurveLeg } from './strategy/curveShape';
-import { ExecutionContext } from './wallet';
+import { ExecutionContext, txDeadline, withFreshDeadline } from './wallet';
 
 const TAG = 'liquidity';
 
@@ -302,6 +302,8 @@ export interface LiquidityCall {
   functionArgs: ClarityValue[];
   postConditions: PostCondition[];
   postConditionMode: 'allow' | 'deny';
+  // Re-stamped on every sign; see withFreshDeadline in wallet.ts.
+  deadlineArgIndex?: number;
 }
 
 export interface AddCallOptions {
@@ -325,35 +327,37 @@ export const buildAddLiquidityCall = (
     ...nftMaybeSentPcs(positions.map((p) => p.binId), signer, pool.poolContract),
   );
 
+  const functionArgs = [
+    listCV(
+      positions.map((p) =>
+        tupleCV({
+          'active-bin-id-offset': intCV(p.offset),
+          'x-amount': uintCV(p.xAmount),
+          'y-amount': uintCV(p.yAmount),
+          'min-dlp': uintCV(p.minDlp),
+          'max-x-liquidity-fee': uintCV(p.maxXFee),
+          'max-y-liquidity-fee': uintCV(p.maxYFee),
+        }),
+      ),
+    ),
+    cp(pool.poolContract),
+    cp(pool.x.contract),
+    cp(pool.y.contract),
+    opts.activeBinTolerance
+      ? someCV(
+          tupleCV({
+            'max-deviation': uintCV(opts.activeBinTolerance.maxDeviation),
+            'expected-bin-id': intCV(opts.activeBinTolerance.expectedSignedBinId),
+          }),
+        )
+      : noneCV(),
+    opts.deadline ? someCV(uintCV(opts.deadline)) : noneCV(),
+  ];
   return {
     contract: CONFIG.LIQUIDITY_ROUTER_CONTRACT,
     functionName: 'add-relative-liquidity-same-multi',
-    functionArgs: [
-      listCV(
-        positions.map((p) =>
-          tupleCV({
-            'active-bin-id-offset': intCV(p.offset),
-            'x-amount': uintCV(p.xAmount),
-            'y-amount': uintCV(p.yAmount),
-            'min-dlp': uintCV(p.minDlp),
-            'max-x-liquidity-fee': uintCV(p.maxXFee),
-            'max-y-liquidity-fee': uintCV(p.maxYFee),
-          }),
-        ),
-      ),
-      cp(pool.poolContract),
-      cp(pool.x.contract),
-      cp(pool.y.contract),
-      opts.activeBinTolerance
-        ? someCV(
-            tupleCV({
-              'max-deviation': uintCV(opts.activeBinTolerance.maxDeviation),
-              'expected-bin-id': intCV(opts.activeBinTolerance.expectedSignedBinId),
-            }),
-          )
-        : noneCV(),
-      opts.deadline ? someCV(uintCV(opts.deadline)) : noneCV(),
-    ],
+    functionArgs,
+    ...(opts.deadline ? { deadlineArgIndex: functionArgs.length - 1 } : {}),
     postConditions,
     postConditionMode: CONFIG.LIQUIDITY_POST_CONDITION_MODE,
   };
@@ -392,6 +396,24 @@ export const buildWithdrawLiquidityCall = (
     ...nftMaybeSentPcs(positions.map((p) => p.binId), signer, pool.poolContract),
   );
 
+  const functionArgs = [
+    listCV(
+      positions.map((p) =>
+        tupleCV({
+          'pool-trait': cp(pool.poolContract),
+          'bin-id': intCV(signedBinId(p.binId)),
+          amount: uintCV(p.amount),
+          'min-x-amount': uintCV(p.minX),
+          'min-y-amount': uintCV(p.minY),
+        }),
+      ),
+    ),
+    cp(pool.x.contract),
+    cp(pool.y.contract),
+    uintCV(totalMinX),
+    uintCV(totalMinY),
+    opts.deadline ? someCV(uintCV(opts.deadline)) : noneCV(),
+  ];
   return {
     contract: CONFIG.LIQUIDITY_ROUTER_CONTRACT,
     // Absolute bin-id entrypoint (not the *relative* one): we withdraw specific
@@ -400,24 +422,8 @@ export const buildWithdrawLiquidityCall = (
     // between our snapshot and broadcast it would target the wrong bin (where we
     // hold nothing). Absolute bin-ids are immune to that drift.
     functionName: 'withdraw-liquidity-same-multi',
-    functionArgs: [
-      listCV(
-        positions.map((p) =>
-          tupleCV({
-            'pool-trait': cp(pool.poolContract),
-            'bin-id': intCV(signedBinId(p.binId)),
-            amount: uintCV(p.amount),
-            'min-x-amount': uintCV(p.minX),
-            'min-y-amount': uintCV(p.minY),
-          }),
-        ),
-      ),
-      cp(pool.x.contract),
-      cp(pool.y.contract),
-      uintCV(totalMinX),
-      uintCV(totalMinY),
-      opts.deadline ? someCV(uintCV(opts.deadline)) : noneCV(),
-    ],
+    functionArgs,
+    ...(opts.deadline ? { deadlineArgIndex: functionArgs.length - 1 } : {}),
     postConditions,
     postConditionMode: CONFIG.LIQUIDITY_POST_CONDITION_MODE,
   };
@@ -439,7 +445,7 @@ export const broadcastLiquidity = async (
     contractAddress: address,
     contractName: name,
     functionName: call.functionName,
-    functionArgs: call.functionArgs,
+    functionArgs: withFreshDeadline(call.functionArgs, call.deadlineArgIndex, (d) => someCV(uintCV(d))),
     senderKey: CONFIG.SIGNER_KEY,
     network: networkName(),
     nonce: BigInt(ctx.nonce),
@@ -456,8 +462,6 @@ export const broadcastLiquidity = async (
   }
   return `0x${(result as { txid: string }).txid}`;
 };
-
-const deadline = (): number => Math.floor(Date.now() / 1000) + CONFIG.TX_DEADLINE_SECONDS;
 
 export interface PreparedCall {
   call: LiquidityCall;
@@ -565,7 +569,7 @@ export const prepareAddLiquidity = async (req: AddLiquidityRequest): Promise<Pre
       maxDeviation: CONFIG.ACTIVE_BIN_MAX_DEVIATION,
       expectedSignedBinId: signedBinId(activeBin),
     },
-    deadline: deadline(),
+    deadline: txDeadline(),
   });
 
   const summary =
@@ -875,7 +879,7 @@ export const prepareShapedAddLiquidity = async (req: ShapedAddRequest): Promise<
       maxDeviation: CONFIG.ACTIVE_BIN_MAX_DEVIATION,
       expectedSignedBinId: signedBinId(activeBin),
     },
-    deadline: deadline(),
+    deadline: txDeadline(),
   });
 
   const totalX = positions.reduce((s, p) => s + p.xAmount, BigInt(0));
@@ -946,7 +950,7 @@ export const prepareWithdrawLiquidity = async (
   if (positions.length === 0) throw new Error('no withdrawable positions found');
 
   const pool = poolRef(quotes.pool_token, quotes.token_x, quotes.token_y);
-  const call = buildWithdrawLiquidityCall(pool, positions, req.signer, { deadline: deadline() });
+  const call = buildWithdrawLiquidityCall(pool, positions, req.signer, { deadline: txDeadline() });
 
   const bins = positions.map((p) => p.binId).join(',');
   const totalMinX = positions.reduce((s, p) => s + p.minX, BigInt(0));

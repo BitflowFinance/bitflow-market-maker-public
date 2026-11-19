@@ -7,6 +7,8 @@ import {
   broadcastTransaction,
   getAddressFromPrivateKey,
   makeContractCall,
+  someCV,
+  uintCV,
   validateStacksAddress,
 } from '@stacks/transactions';
 import { CONFIG } from './config';
@@ -309,7 +311,30 @@ export interface ContractCall {
   functionArgs: ClarityValue[];
   postConditions: PostCondition[];
   postConditionMode: PostConditionMode;
+  // Position of the router's `(optional uint)` deadline in functionArgs, when the
+  // call carries one. See withFreshDeadline.
+  deadlineArgIndex?: number;
 }
+
+export const txDeadline = (nowMs = Date.now()): number =>
+  Math.floor(nowMs / 1000) + CONFIG.TX_DEADLINE_SECONDS;
+
+// The routers reject a call once stacks-block-time passes its deadline
+// (ERR_DEADLINE_PASSED, err u5009). A deadline fixed at prepare time has already
+// expired by the time submitWithConfirmation replaces a stuck tx (the
+// confirmation timeout equals the deadline window), so every bump would be mined
+// as a failure that still pays the higher fee. Re-stamping the deadline on each
+// sign gives every broadcast its own full window; the plan's min-out / min-dlp /
+// active-bin-tolerance bounds still guard against executing at a worse price.
+// `make` builds the Clarity value because liquidity.ts signs with stacks-tx-v7,
+// whose value shapes differ from v6.
+export const withFreshDeadline = <A>(
+  args: A[],
+  deadlineArgIndex: number | undefined,
+  make: (deadline: number) => A,
+  nowMs = Date.now(),
+): A[] =>
+  deadlineArgIndex === undefined ? args : args.map((a, i) => (i === deadlineArgIndex ? make(txDeadline(nowMs)) : a));
 
 export const signAndBroadcast = async (
   call: ContractCall,
@@ -322,7 +347,7 @@ export const signAndBroadcast = async (
     contractAddress: address,
     contractName: name,
     functionName: call.functionName,
-    functionArgs: call.functionArgs,
+    functionArgs: withFreshDeadline(call.functionArgs, call.deadlineArgIndex, (d) => someCV(uintCV(d))),
     senderKey: CONFIG.SIGNER_KEY,
     network,
     nonce: ctx.nonce,
