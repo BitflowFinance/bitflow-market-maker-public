@@ -279,4 +279,5 @@ See `.env.example` and the pair files for the full list.
 
 - [docs/RECOVERY.md](./docs/RECOVERY.md): halt and resume, self-halts, stuck transactions, full exit, restart.
 - [SECURITY.md](./SECURITY.md): key handling and the metrics port.
+- [CONTRIBUTING.md](./CONTRIBUTING.md): ground rules for pull requests, the checks to run, and bounties.
 - [Guides for AI Bitcoin Agents](https://github.com/k9dreamer-graphite-elan/guides-for-ai-bitcoin-agents) (community edition, unofficial): handbook, runbooks and per-pool notes for [dlmm_1](https://github.com/k9dreamer-graphite-elan/guides-for-ai-bitcoin-agents/blob/main/public/hodlmm/knowledge/pools/dlmm_1.md) and [dlmm_14](https://github.com/k9dreamer-graphite-elan/guides-for-ai-bitcoin-agents/blob/main/public/hodlmm/knowledge/pools/dlmm_14.md). Optional reading; this bot does not depend on it or on any external skills.

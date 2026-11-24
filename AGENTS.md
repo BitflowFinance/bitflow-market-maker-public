@@ -12,6 +12,8 @@ npm start -- --pool sbtc      # Compiled loop (prefer `node dist/index.js`)
 npm run ui         # Local app at http://127.0.0.1:5191. See "Setting up the app" below.
 ```
 
+Before changing this repo or opening a PR, read [CONTRIBUTING.md](./CONTRIBUTING.md): dry run only, security issues reported privately, and the checks a PR must pass.
+
 ## Setting up the app
 
 When a user has just downloaded this repo and asks you to set it up, get the app online and hand them the URL:
